@@ -1,0 +1,37 @@
+use clap::{Parser};
+use std::error::Error;
+use wasmtime::*;
+use common::*;
+use hostfn::*;
+
+mod common;
+mod hostfn;
+
+fn main() -> Result<(), Box<dyn Error>> {
+
+    let cli = CLI::parse();
+    
+    let is_replay = cli.rr.replay_path.is_some();
+    let config = config_setup_rr(cli.rr.record_path, cli.rr.replay_path);
+
+    let engine = Engine::new(&config)?;
+    let component = component::Component::from_file(&engine, cli.file)?;
+    let mut linker = component::Linker::new(&engine);
+    // Remove the imports for replay
+    if is_replay {
+        //linker.root().func_wrap("double", |_store, p: (i32,)| Ok((p.0,)))?;
+    } else {
+        linker.root().func_wrap("component:test-package/env/double", |_store, p: (i32,)| Ok((host_double_fn(p.0),)))?;
+    }
+
+    let mut store = Store::new(&engine, ());
+    let instance = linker.instantiate(&mut store, &component)?;
+
+    let func = instance.get_typed_func::<(i32,), (i32,)>(&mut store, "main").expect("main export not found"); 
+    let input = (42,);
+    let result = func.call(&mut store, input)?;
+
+    println!("Execution produced result: {:?}", result);
+    Ok(())
+}
+

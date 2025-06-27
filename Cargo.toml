@@ -3,6 +3,14 @@ name = "wasmtime-rr-tests"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "rr-core"
+path = "src/core.rs"
+
+[[bin]]
+name = "rr-component"
+path = "src/component.rs"
+
 [dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
 wasmtime = { path = "../wasmtime/crates/wasmtime" }
