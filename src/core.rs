@@ -2,10 +2,10 @@ use clap::{Parser};
 use std::error::Error;
 use wasmtime::*;
 use common::*;
-use hostfn::*;
+use imports_core::*;
 
 mod common;
-mod hostfn;
+mod imports_core;
 
 fn main() -> Result<(), Box<dyn Error>> {
 

@@ -2,10 +2,10 @@ use clap::{Parser};
 use std::error::Error;
 use wasmtime::*;
 use common::*;
-use hostfn::*;
+use imports_component::*;
 
 mod common;
-mod hostfn;
+mod imports_component;
 
 fn main() -> Result<(), Box<dyn Error>> {
 
@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if is_replay {
         //linker.root().func_wrap("double", |_store, p: (i32,)| Ok((p.0,)))?;
     } else {
-        linker.root().func_wrap("component:test-package/env/double", |_store, p: (i32,)| Ok((host_double_fn(p.0),)))?;
+        linker.root().func_wrap("component:test-package/env/double", |_store, p: (i32,)| Ok((p.0*2,)))?;
     }
 
     let mut store = Store::new(&engine, ());

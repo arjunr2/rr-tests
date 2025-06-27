@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "rr-core"
+name = "complex-core-rr"
 path = "src/core.rs"
 
 [[bin]]
-name = "rr-component"
+name = "complex-component-rr"
 path = "src/component.rs"
 
 [dependencies]
