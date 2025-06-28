@@ -4,14 +4,18 @@
 
 meta=tmp.wat
 
+mkdir -p components/wit
+
 for core in core-componentizable/*; do
     base=$(basename ${core%%.*})
-    wit=wit/$base.wit
+    base_wit=wit/$base.wit
     component=components/$base.wat
-    echo "Processing '$core' with '$wit'"
+    new_wit=components/wit/$base.wit
+    echo "Processing '$core' with '$base_wit'"
     set -x
-    wasm-tools component embed $wit $core -t -o $meta
+    wasm-tools component embed $base_wit $core -t -o $meta
     wasm-tools component new $meta -t -o $component
+    wasm-tools component wit $component -o $new_wit
     set +x
     rm $meta
 done

@@ -1,6 +1,0 @@
-package component:test-package;
-
-world my-world {
-    import rand: func() -> u32;
-    export main: func(x: u32) -> u32;
-}

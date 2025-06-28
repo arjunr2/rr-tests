@@ -2,7 +2,7 @@ use clap::{Parser};
 use std::error::Error;
 use wasmtime::*;
 use common::*;
-use imports_component::*;
+use imports_component::complex;
 
 mod common;
 mod imports_component;
@@ -16,18 +16,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let engine = Engine::new(&config)?;
     let component = component::Component::from_file(&engine, cli.file)?;
+
     let mut linker = component::Linker::new(&engine);
+    complex::Root::add_to_linker::<_, component::HasSelf<_>>(&mut linker, |state| state)?;
     // Remove the imports for replay
-    if is_replay {
-        //linker.root().func_wrap("double", |_store, p: (i32,)| Ok((p.0,)))?;
-    } else {
-        linker.root().func_wrap("component:test-package/env/double", |_store, p: (i32,)| Ok((p.0*2,)))?;
-    }
 
     let mut store = Store::new(&engine, ());
     let instance = linker.instantiate(&mut store, &component)?;
 
-    let func = instance.get_typed_func::<(i32,), (i32,)>(&mut store, "main").expect("main export not found"); 
+    let func = instance.get_typed_func::<(u32,), (u32,)>(&mut store, "main").expect("main export not found"); 
     let input = (42,);
     let result = func.call(&mut store, input)?;
 

@@ -1,4 +1,4 @@
-package component:test-package
+package component:test-package;
 
 interface env {
     double: func(x: u32) -> u32;
