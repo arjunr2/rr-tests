@@ -1,7 +1,7 @@
 use wasmtime::component::bindgen;
 
 
-bindgen!("root" in "test-modules/components/wit/complex-import-singlereturn.wit");
+bindgen!("root" in "test-modules/components/wit/complex-singlereturn.wit");
 
 impl component::test_package::env::Host for () {
     fn double(&mut self, x: u32) -> u32 {
