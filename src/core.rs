@@ -19,11 +19,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut linker = Linker::new(&engine);
     // Remove the imports for replay
     if is_replay {
-        linker.func_wrap("env", "double", host_double_fn)?
-            .func_wrap("env", "complex", host_complex_fn)?;
-    } else {
         linker.func_wrap("env", "double", stub_double_fn)?
             .func_wrap("env", "complex", stub_complex_fn)?;
+    } else {
+        linker.func_wrap("env", "double", host_double_fn)?
+            .func_wrap("env", "complex", host_complex_fn)?;
     }
 
     let mut store = Store::new(&engine, ());
