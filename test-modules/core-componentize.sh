@@ -6,9 +6,11 @@ meta=tmp.wat
 
 mkdir -p components/wit
 
-for core in core-componentizable/*; do
+core_wit_dir=core-componentizable/wit
+
+for core in core-componentizable/*.wat; do
     base=$(basename ${core%%.*})
-    base_wit=wit/$base.wit
+    base_wit=$core_wit_dir/$base.wit
     component=components/$base.wat
     new_wit=components/wit/$base.wit
     echo "Processing '$core' with '$base_wit'"
