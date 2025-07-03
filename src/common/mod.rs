@@ -14,7 +14,7 @@ pub struct RrCLI {
 #[derive(Parser)]
 #[command(version, about = "Test Harness for Record/Replay in Wasmtime", long_about=None)]
 pub struct CLI {
-    #[arg(short, long, default_value_t = String::from("test-modules/double-import.wat"))]
+    #[arg(short, long, default_value_t = String::from("test.wat"))]
     pub file: String,
 
     #[command(flatten)]

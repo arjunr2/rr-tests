@@ -4,14 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "complex-core-rr"
+name = "core-rr"
 path = "src/core.rs"
 
 [[bin]]
-name = "complex-component-rr"
-path = "src/component.rs"
+name = "complex"
+path = "src/complex.rs"
+
+[[bin]]
+name = "multi-return"
+path = "src/multi_return.rs"
 
 [dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
+prime_factorization = "1.0.5"
 wasmtime = { path = "../wasmtime/crates/wasmtime" }
 

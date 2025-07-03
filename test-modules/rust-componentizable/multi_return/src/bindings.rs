@@ -12,7 +12,7 @@ pub trait Guest {
     fn main(x: u32) -> u32;
 }
 #[doc(hidden)]
-macro_rules! __export_world_complex_world_cabi {
+macro_rules! __export_world_my_world_cabi {
     ($ty:ident with_types_in $($path_to_types:tt)*) => {
         const _ : () = { #[unsafe (export_name = "main")] unsafe extern "C" fn
         export_main(arg0 : i32,) -> i32 { unsafe { $($path_to_types)*::
@@ -20,7 +20,7 @@ macro_rules! __export_world_complex_world_cabi {
     };
 }
 #[doc(hidden)]
-pub(crate) use __export_world_complex_world_cabi;
+pub(crate) use __export_world_my_world_cabi;
 #[rustfmt::skip]
 #[allow(dead_code, clippy::all)]
 pub mod component {
@@ -156,30 +156,29 @@ mod _rt {
 /// ```
 #[allow(unused_macros)]
 #[doc(hidden)]
-macro_rules! __export_complex_world_impl {
+macro_rules! __export_my_world_impl {
     ($ty:ident) => {
         self::export!($ty with_types_in self);
     };
     ($ty:ident with_types_in $($path_to_types_root:tt)*) => {
-        $($path_to_types_root)*:: __export_world_complex_world_cabi!($ty with_types_in
+        $($path_to_types_root)*:: __export_world_my_world_cabi!($ty with_types_in
         $($path_to_types_root)*);
     };
 }
 #[doc(inline)]
-pub(crate) use __export_complex_world_impl as export;
+pub(crate) use __export_my_world_impl as export;
 #[cfg(target_arch = "wasm32")]
 #[unsafe(
-    link_section = "component-type:wit-bindgen:0.41.0:component:test-package:complex-world:encoded world"
+    link_section = "component-type:wit-bindgen:0.41.0:component:test-package:my-world:encoded world"
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 252] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07y\x01A\x02\x01A\x04\x01\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 242] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07t\x01A\x02\x01A\x04\x01\
 B\x03\x01py\x01@\x01\x01xy\0\0\x04\0\x07factors\x01\x01\x03\0\x1acomponent:test-\
-package/env\x05\0\x01@\x01\x01xy\0y\x04\0\x04main\x01\x01\x04\0$component:test-p\
-ackage/complex-world\x04\0\x0b\x13\x01\0\x0dcomplex-world\x03\0\0\0G\x09producer\
-s\x01\x0cprocessed-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.4\
-1.0";
+package/env\x05\0\x01@\x01\x01xy\0y\x04\0\x04main\x01\x01\x04\0\x1fcomponent:tes\
+t-package/my-world\x04\0\x0b\x0e\x01\0\x08my-world\x03\0\0\0G\x09producers\x01\x0c\
+processed-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

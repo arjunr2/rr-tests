@@ -1,8 +1,3 @@
-use wasmtime::component::bindgen;
-
-
-bindgen!("root" in "test-modules/components/wit/complex-singlereturn.wit");
-
 impl component::test_package::env::Host for () {
     fn double(&mut self, x: u32) -> u32 {
         x * 2
@@ -12,3 +7,12 @@ impl component::test_package::env::Host for () {
         (x * x) as u64 + y
     }
 }
+
+mod component_macro;
+bin!{
+    complex, 
+    "root" in "test-modules/components/wit/complex-singlereturn-indirect.wit",
+    "test-modules/components/complex-singlereturn-indirect.wat",
+    Root
+}
+

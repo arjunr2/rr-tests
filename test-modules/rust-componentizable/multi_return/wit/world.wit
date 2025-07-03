@@ -4,7 +4,7 @@ interface env {
     factors: func(x: u32) -> list<u32>;
 }
 
-world complex-world {
+world my-world {
     import env;
     export main: func(x: u32) -> u32;
 }
