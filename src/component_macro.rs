@@ -15,6 +15,7 @@ macro_rules! bin {
 
             let cli = CLI::parse();
             
+            let is_replay = cli.rr.replay_path.is_some();
             let config = config_setup_rr(cli.rr.record_path, cli.rr.replay_path);
 
             let engine = Engine::new(&config)?;
@@ -22,8 +23,13 @@ macro_rules! bin {
             let component = Component::from_file(&engine, $file)?;
 
             let mut linker = Linker::new(&engine);
-            $rs_world::add_to_linker::<_, HasSelf<_>>(&mut linker, |state| state)?;
             // Remove the imports for replay
+            if is_replay {
+                println!("Stubbing out all imports...");
+                linker.define_unknown_imports_as_traps(&component)?;
+            } else {
+                $rs_world::add_to_linker::<_, HasSelf<_>>(&mut linker, |state| state)?;
+            }
 
             let mut store = Store::new(&engine, ());
             let instance = linker.instantiate(&mut store, &component)?;
