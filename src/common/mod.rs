@@ -19,6 +19,9 @@ pub struct CLI {
 
     #[command(flatten)]
     pub rr: RrCLI,
+
+    #[arg(short = 's', long = "stub", default_value_t = false)]
+    pub stub_imports: bool
 }
 
 

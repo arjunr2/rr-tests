@@ -15,7 +15,11 @@ macro_rules! bin {
 
             let cli = CLI::parse();
             
-            let is_replay = cli.rr.replay_path.is_some();
+            let stub_imports = if cli.rr.replay_path.is_some() {
+                cli.stub_imports
+            } else {
+                false
+            };
             let config = config_setup_rr(cli.rr.record_path, cli.rr.replay_path);
 
             let engine = Engine::new(&config)?;
@@ -24,7 +28,7 @@ macro_rules! bin {
 
             let mut linker = Linker::new(&engine);
             // Remove the imports for replay
-            if is_replay {
+            if stub_imports {
                 println!("Stubbing out all imports...");
                 linker.define_unknown_imports_as_traps(&component)?;
             } else {
