@@ -20,7 +20,7 @@ macro_rules! bin {
             } else {
                 false
             };
-            let config = config_setup_rr(cli.rr.record_path, cli.rr.replay_path);
+            let config = config_setup_rr(cli.rr.record_path, cli.rr.replay_path, cli.validate);
 
             let engine = Engine::new(&config)?;
             // Don't use CLI.file for components since it's static anyway

@@ -2,7 +2,7 @@ use clap::{Parser, Args};
 use wasmtime::*;
 
 #[derive(Args)]
-#[group(required = true, multiple = false)]
+#[group(multiple = false)]
 pub struct RrCLI {
     #[arg(short = 'c', long = "record")]
     pub record_path: Option<String>,
@@ -21,19 +21,23 @@ pub struct CLI {
     pub rr: RrCLI,
 
     #[arg(short = 's', long = "stub", default_value_t = false)]
-    pub stub_imports: bool
+    pub stub_imports: bool,
+
+    #[arg(short = 'v', long = "validate", default_value_t = false)]
+    pub validate: bool
 }
 
 
-pub fn config_setup_rr(record_path: Option<String>, replay_path: Option<String>) -> Config {
+pub fn config_setup_rr(record_path: Option<String>, replay_path: Option<String>, validate: bool) -> Config {
     let mut config = Config::default();
-    let rr_cfg = Some (if let Some(path) = &record_path {
-        RRConfig::record_cfg(path.clone(), None)
+    let rr_cfg = if let Some(path) = &record_path {
+        Some(RRConfig::record_cfg(path.clone(), Some(RecordMetadata { add_validation: validate })))
     } else if let Some(path) = &replay_path {
-        RRConfig::replay_cfg(path.clone(), None)
+        Some(RRConfig::replay_cfg(path.clone(), Some(ReplayMetadata { validate: validate })))
     } else {
-        panic!("Record or replay has to be specified")
-    });
+        println!("Record or replay not specified");
+        None
+    };
     config.rr(rr_cfg.clone())
         .debug_info(true)
         .cranelift_opt_level(OptLevel::None);

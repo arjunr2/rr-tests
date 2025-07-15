@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cli = CLI::parse();
     
     let is_replay = cli.rr.replay_path.is_some();
-    let config = config_setup_rr(cli.rr.record_path, cli.rr.replay_path);
+    let config = config_setup_rr(cli.rr.record_path, cli.rr.replay_path, cli.validate);
 
     let engine = Engine::new(&config)?;
     let module = Module::from_file(&engine, cli.file)?;
