@@ -15,25 +15,14 @@ macro_rules! bin {
 
             let cli = CLI::parse();
             
-            let stub_imports = if cli.rr.replay_path.is_some() {
-                cli.stub_imports
-            } else {
-                false
-            };
-            let config = config_setup_rr(cli.rr.record_path, cli.rr.replay_path, cli.validate);
+            let config = config_setup(&cli);
 
             let engine = Engine::new(&config)?;
             // Don't use CLI.file for components since it's static anyway
             let component = Component::from_file(&engine, $file)?;
 
             let mut linker = Linker::new(&engine);
-            // Remove the imports for replay
-            if stub_imports {
-                println!("Stubbing out all imports...");
-                linker.define_unknown_imports_as_traps(&component)?;
-            } else {
-                $rs_world::add_to_linker::<_, HasSelf<_>>(&mut linker, |state| state)?;
-            }
+            $rs_world::add_to_linker::<_, HasSelf<_>>(&mut linker, |state| state)?;
 
             let mut store = Store::new(&engine, ());
             let instance = linker.instantiate(&mut store, &component)?;

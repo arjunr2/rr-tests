@@ -9,7 +9,7 @@ impl component::test_package::env::Host for () {
 mod component_macro;
 bin!{
     multi_return, 
-    "my-world" in "test-modules/components/wit/multi_return.wit", 
+    "my-world" in "../test-modules/components/wit/multi_return.wit", 
     "test-modules/components/multi_return.wat", 
     MyWorld
 }

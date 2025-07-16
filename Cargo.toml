@@ -1,22 +1,14 @@
-[package]
-name = "wasmtime-rr-tests"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = [
+    "rr",
+    "stock"
+]
+resolver = "3"
 
-[[bin]]
-name = "core-rr"
-path = "src/core.rs"
+[workspace.package]
+authors = ["Arjun Ramesh <arjunr2@andrew.cmu.edu>"]
+version = "0.0.1"
 
-[[bin]]
-name = "complex"
-path = "src/complex.rs"
-
-[[bin]]
-name = "multi-return"
-path = "src/multi_return.rs"
-
-[dependencies]
+[workspace.dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
 prime_factorization = "1.0.5"
-wasmtime = { path = "../wasmtime/crates/wasmtime" }
-

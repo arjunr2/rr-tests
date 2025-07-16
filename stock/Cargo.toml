@@ -1,0 +1,21 @@
+[package]
+name = "wasmtime-stock-tests"
+edition = "2024"
+
+[[bin]]
+name = "core-stock"
+path = "core.rs"
+
+[[bin]]
+name = "complex-stock"
+path = "complex.rs"
+
+[[bin]]
+name = "multi-return-stock"
+path = "multi_return.rs"
+
+[dependencies]
+clap.workspace = true
+prime_factorization.workspace = true
+# Stock wasmtime 
+wasmtime = { git = "https://github.com/arjunr2/wasmtime", rev ="e471433", package = "wasmtime" }

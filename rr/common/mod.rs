@@ -35,8 +35,7 @@ pub fn config_setup_rr(record_path: Option<String>, replay_path: Option<String>,
     } else if let Some(path) = &replay_path {
         Some(RRConfig::replay_cfg(path.clone(), Some(ReplayMetadata { validate: validate })))
     } else {
-        println!("Record or replay not specified");
-        None
+        panic!("Record or replay not specified");
     };
     config.rr(rr_cfg.clone())
         .debug_info(true)

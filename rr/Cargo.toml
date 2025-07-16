@@ -1,0 +1,20 @@
+[package]
+name = "wasmtime-rr-tests"
+edition = "2024"
+
+[[bin]]
+name = "core-rr"
+path = "core.rs"
+
+[[bin]]
+name = "complex"
+path = "complex.rs"
+
+[[bin]]
+name = "multi-return"
+path = "multi_return.rs"
+
+[dependencies]
+clap.workspace = true
+prime_factorization.workspace = true
+wasmtime = { path = "../../wasmtime/crates/wasmtime", features = ["default", "rr"] }

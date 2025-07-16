@@ -11,7 +11,7 @@ impl component::test_package::env::Host for () {
 mod component_macro;
 bin!{
     complex, 
-    "root" in "test-modules/components/wit/complex-singlereturn-indirect.wit",
+    "root" in "../test-modules/components/wit/complex-singlereturn-indirect.wit",
     "test-modules/components/complex-singlereturn-indirect.wat",
     Root
 }
