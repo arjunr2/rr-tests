@@ -8,7 +8,7 @@ use bindings::component::test_package::env::factors;
 struct Component;
 
 impl Guest for Component {
-    /// Say hello!
+    /// Sum the prime factors of numbers 0 through 100000
     fn main(x: u32) -> u32 {
         (0..10000).map(|x| {
             let y = factors(x);

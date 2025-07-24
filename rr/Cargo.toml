@@ -16,5 +16,6 @@ path = "multi_return.rs"
 
 [dependencies]
 clap.workspace = true
+env_logger = "0.11.8"
 prime_factorization.workspace = true
 wasmtime = { path = "../../wasmtime/crates/wasmtime", features = ["default", "rr"] }

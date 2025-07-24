@@ -6,12 +6,14 @@ macro_rules! bin {
         use wasmtime::*;
         use wasmtime::component::{Component, Linker, HasSelf, bindgen};
         use common::*;
+        use env_logger;
 
         mod common;
 
         bindgen!($str_world in $path);
 
         fn main() -> Result<(), Box<dyn Error>> {
+            env_logger::init();
 
             let cli = CLI::parse();
             

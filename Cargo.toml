@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "rr",
-    "stock"
+    "stock",
+    "wasi-modules"
 ]
 resolver = "3"
 

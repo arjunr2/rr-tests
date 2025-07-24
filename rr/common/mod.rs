@@ -1,5 +1,7 @@
 use clap::{Parser, Args};
 use wasmtime::*;
+use std::fs::File;
+use std::sync::Arc;
 
 #[derive(Args)]
 #[group(multiple = false)]
@@ -30,14 +32,24 @@ pub struct CLI {
 
 pub fn config_setup_rr(record_path: Option<String>, replay_path: Option<String>, validate: bool) -> Config {
     let mut config = Config::default();
-    let rr_cfg = if let Some(path) = &record_path {
-        Some(RRConfig::record_cfg(path.clone(), Some(RecordMetadata { add_validation: validate })))
-    } else if let Some(path) = &replay_path {
-        Some(RRConfig::replay_cfg(path.clone(), Some(ReplayMetadata { validate: validate })))
+    let rr_cfg = if let Some(path) = record_path {
+        RRConfig::from(RecordConfig {
+            writer_initializer: Arc::new(move || Box::new(File::create(&path).unwrap())),
+            metadata: RecordMetadata {
+                add_validation: validate
+            }
+        })
+    } else if let Some(path) = replay_path {
+        RRConfig::from(ReplayConfig {
+            reader_initializer: Arc::new(move || Box::new(File::open(&path).unwrap())),
+            metadata: ReplayMetadata {
+                validate: validate
+            }
+        })
     } else {
         panic!("Record or replay not specified");
     };
-    config.rr(rr_cfg.clone())
+    config.rr(Some(rr_cfg))
         .debug_info(true)
         .cranelift_opt_level(OptLevel::None);
     config
