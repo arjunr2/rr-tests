@@ -9,6 +9,8 @@ mod imports_core;
 
 fn main() -> Result<(), Box<dyn Error>> {
 
+    env_logger::init();
+
     let cli = CLI::parse();
     
     let is_replay = cli.rr.replay_path.is_some();

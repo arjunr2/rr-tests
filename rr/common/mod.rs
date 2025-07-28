@@ -1,6 +1,7 @@
 use clap::{Parser, Args};
 use wasmtime::*;
 use std::fs::File;
+use std::io::{BufWriter, BufReader};
 use std::sync::Arc;
 
 #[derive(Args)]
@@ -33,15 +34,15 @@ pub struct CLI {
 pub fn config_setup_rr(record_path: Option<String>, replay_path: Option<String>, validate: bool) -> Config {
     let mut config = Config::default();
     let rr_cfg = if let Some(path) = record_path {
+        let mut opts = RecordMetadata::default();
+        opts.add_validation = validate;
         RRConfig::from(RecordConfig {
-            writer_initializer: Arc::new(move || Box::new(File::create(&path).unwrap())),
-            metadata: RecordMetadata {
-                add_validation: validate
-            }
+            writer_initializer: Arc::new(move || Box::new(BufWriter::new(File::create(&path).unwrap()))),
+            metadata: opts
         })
     } else if let Some(path) = replay_path {
         RRConfig::from(ReplayConfig {
-            reader_initializer: Arc::new(move || Box::new(File::open(&path).unwrap())),
+            reader_initializer: Arc::new(move || Box::new(BufReader::new(File::open(&path).unwrap()))),
             metadata: ReplayMetadata {
                 validate: validate
             }
