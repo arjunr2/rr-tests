@@ -33,25 +33,24 @@ pub struct CLI {
 
 pub fn config_setup_rr(record_path: Option<String>, replay_path: Option<String>, validate: bool) -> Config {
     let mut config = Config::default();
-    let rr_cfg = if let Some(path) = record_path {
+    if let Some(path) = record_path {
         let mut opts = RecordMetadata::default();
         opts.add_validation = validate;
-        RRConfig::from(RecordConfig {
+        config.enable_record(RecordConfig {
             writer_initializer: Arc::new(move || Box::new(BufWriter::new(File::create(&path).unwrap()))),
             metadata: opts
-        })
+        }).unwrap();
     } else if let Some(path) = replay_path {
-        RRConfig::from(ReplayConfig {
+        config.enable_replay(ReplayConfig {
             reader_initializer: Arc::new(move || Box::new(BufReader::new(File::open(&path).unwrap()))),
             metadata: ReplayMetadata {
                 validate: validate
             }
-        })
+        }).unwrap();
     } else {
         panic!("Record or replay not specified");
     };
-    config.rr(Some(rr_cfg))
-        .debug_info(true)
+    config.debug_info(true)
         .cranelift_opt_level(OptLevel::None);
     config
 }
