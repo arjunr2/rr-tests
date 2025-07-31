@@ -1655,6 +1655,7 @@ dependencies = [
  "bumpalo",
  "cc",
  "cfg-if",
+ "embedded-io 0.6.1",
  "encoding_rs",
  "fxprof-processed-profile",
  "gimli",
