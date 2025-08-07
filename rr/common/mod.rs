@@ -45,7 +45,8 @@ pub fn config_setup_rr(record_path: Option<String>, replay_path: Option<String>,
         config.enable_replay(ReplayConfig {
             reader_initializer: Arc::new(move || Box::new(BufReader::new(File::open(&path).unwrap()))),
             settings: ReplaySettings {
-                validate: validate
+                validate: validate,
+                ..Default::default()
             }
         }).unwrap();
     } else {
