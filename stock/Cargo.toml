@@ -18,4 +18,4 @@ path = "multi_return.rs"
 clap.workspace = true
 prime_factorization.workspace = true
 # Stock wasmtime 
-wasmtime = { git = "https://github.com/arjunr2/wasmtime", rev ="e471433", package = "wasmtime" }
+wasmtime = { git = "https://github.com/bytecodealliance/wasmtime", rev ="3cbeb24bc828ad0f47dcb3c0cc5f428aa2dc5165", package = "wasmtime" }

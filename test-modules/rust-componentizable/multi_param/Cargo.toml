@@ -13,3 +13,5 @@ crate-type = ["cdylib"]
 package = "component:multi-param"
 
 [package.metadata.component.dependencies]
+
+[workspace]

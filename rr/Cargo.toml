@@ -18,5 +18,4 @@ path = "multi_return.rs"
 clap.workspace = true
 env_logger = "0.11.8"
 prime_factorization.workspace = true
-wasmtime = { path = "../../wasmtime/crates/wasmtime", features = ["default", "rr-component",
-    "rr-core", "rr-validate"] }
+wasmtime = { path = "../../wasmtime-rr-prototyping/crates/wasmtime", features = ["default", "rr-component", "rr-validate"] }

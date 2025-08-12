@@ -3,8 +3,6 @@ RUST_TOMLS=$(addsuffix /Cargo.toml,$(RUST_LIBS))
 
 RUST_TARGET_PATH=target/wasm32-wasip1/release
 
-SHELL=/bin/bash -e -c
-
 .PHONY: all clean $(RUST_TOMLS) $(RUST_LIBS)
 
 components: core rust
