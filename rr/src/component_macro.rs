@@ -65,7 +65,7 @@ macro_rules! bin {
         }
     );
 
-    ($component:literal) => (
+    ($component:literal $(, $func:ident, $param_ty:ty, $result_ty:ty, $($input: tt)*)?) => (
         wasmtime_rr_tests::bin!(@uses);
 
         fn main() -> Result<(), Box<dyn Error>> {
@@ -75,7 +75,6 @@ macro_rules! bin {
             let component_wat = $component;
 
             let component = Component::new(&engine, component_wat)?;
-            let mut store = Store::new(&engine, ());
 
             let mut linker = Linker::new(&engine);
             // Remove the imports for replay
@@ -83,8 +82,17 @@ macro_rules! bin {
                 println!("Stubbing out all imports...");
                 linker.define_unknown_imports_as_traps(&component)?;
             }
+
+            let mut store = Store::new(&engine, ());
             // runs the start function
-            linker.instantiate(&mut store, &component)?;
+            let instance = linker.instantiate(&mut store, &component)?;
+            $(
+                let func_name = stringify!($func);
+                let func = instance.get_typed_func::<$param_ty, $result_ty>(&mut store, func_name).expect(&format!("{func_name} export not found"));
+                let result = func.call(&mut store, $($input)*)?;
+                println!("Execution produced result: {:?}", result);
+            )?
+
             Ok(())
         }
     );
