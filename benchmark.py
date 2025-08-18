@@ -12,7 +12,7 @@ hyperfine = "hyperfine --warmup 3 --shell=none".split(' ')
 program_common = "--dir=data target/wasm32-wasip2/debug/wasi-compressor.wasm data/uncompressed-10M"
 
 # With recording enabled
-subprocess.run(hyperfine + [' '.join([args.rr, "-R path=test.trace", program_common])])
+subprocess.run(hyperfine + [' '.join([args.rr, "-R path=\"\"", program_common])])
 ## With recording disabled
 subprocess.run(hyperfine + [' '.join([args.rr, program_common])])
 ## On stock upstream

@@ -14,6 +14,10 @@ path = "complex.rs"
 name = "multi-return"
 path = "multi_return.rs"
 
+[[bin]]
+name = "resource-1"
+path = "resource-1.rs"
+
 [dependencies]
 clap.workspace = true
 env_logger = "0.11.8"

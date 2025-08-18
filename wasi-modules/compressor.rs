@@ -1,5 +1,5 @@
 use std::fs::{File};
-use std::io::{BufReader};
+use std::io::{BufReader, Write};
 use std::path::{PathBuf};
 use std::error::Error;
 
@@ -11,8 +11,12 @@ use walkdir::WalkDir;
 #[command(version, about = "Compresses all files in a directory using zstd", long_about = None)]
 struct Args {
     /// Path to the input directory
-    #[arg(value_name = "DIR")]
+    #[arg(short = 'i', long = "input", value_name = "DIR")]
     input_dir: PathBuf,
+
+    /// Path to the input directory
+    #[arg(short = 'o', long = "output", value_name = "FILE")]
+    output_file: PathBuf,
 
     /// Compression level (1–21)
     #[arg(short, long, default_value_t = 3)]
@@ -43,5 +47,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let size = output_vec.len();
     println!("Compressed size: {}", size);
+    let mut f = File::create(args.output_file)?;
+    f.write_all(&output_vec)?;
     Ok(())
 }
