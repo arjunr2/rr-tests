@@ -1,11 +1,12 @@
+#![allow(unused)]
+
 #[macro_export]
 macro_rules! bin {
     (@uses) => {
         use std::error::Error;
         use wasmtime::component::{Component, Linker};
         use wasmtime::{Engine, Store};
-        use common::*;
-        mod common;
+        use wasmtime_rr_tests::*;
     };
 
     (@setup) => ({
@@ -25,7 +26,7 @@ macro_rules! bin {
     });
 
     ($bin:ident, $str_world: literal in $path: literal, $file: literal, $rs_world:ident) => (
-        bin!(@uses);
+        wasmtime_rr_tests::bin!(@uses);
 
         use wasmtime::component::{HasSelf, bindgen};
 
@@ -65,7 +66,7 @@ macro_rules! bin {
     );
 
     ($component:literal) => (
-        bin!(@uses);
+        wasmtime_rr_tests::bin!(@uses);
 
         fn main() -> Result<(), Box<dyn Error>> {
             let (config, stub_imports) = bin!(@setup);
@@ -82,7 +83,8 @@ macro_rules! bin {
                 println!("Stubbing out all imports...");
                 linker.define_unknown_imports_as_traps(&component)?;
             }
-            linker.instantiate(&mut store, &component)?; // runs the start function
+            // runs the start function
+            linker.instantiate(&mut store, &component)?;
             Ok(())
         }
     );
