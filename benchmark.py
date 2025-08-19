@@ -9,11 +9,12 @@ args = parser.parse_args()
 
 hyperfine = "hyperfine --warmup 3 --shell=none".split(' ')
 
-program_common = "--dir=data target/wasm32-wasip2/debug/wasi-compressor.wasm data/uncompressed-10M"
+program_common = "--dir=data target/wasm32-wasip2/debug/wasi-compressor.wasm --input data/uncompressed-10M --output data/compressed.bin"
 
-# With recording enabled
-subprocess.run(hyperfine + [' '.join([args.rr, "-R path=\"\"", program_common])])
-## With recording disabled
-subprocess.run(hyperfine + [' '.join([args.rr, program_common])])
-## On stock upstream
-subprocess.run(hyperfine + [' '.join([args.upstream, program_common])])
+subprocess.run(
+        hyperfine 
+        + [f"-n \"{x}\"" for x in ["wasmtime-rr-record-enabled", "wasmtime-rr-record-disabled", "wasmtime-without-rr"]]
+        + [' '.join([args.rr, "-R path=\"\"", program_common])]
+        + [' '.join([args.rr, program_common])]
+        + [' '.join([args.upstream, program_common])]
+)
