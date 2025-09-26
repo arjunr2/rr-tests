@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "rr",
-    "stock",
+    "stock", "test-modules/rust-componentizable/complex_params",
     "wasi-modules"
 ]
 resolver = "3"

@@ -7,10 +7,10 @@ impl component::test_package::env::Host for () {
 }
 
 wasmtime_rr_tests::bin! {
-    multi_return,
-    "my-world" in "../test-modules/components/wit/multi_return.wit",
-    "test-modules/components/multi_return.wat",
+    complex_params,
+    "my-world" in "../test-modules/components/wit/complex_params.wit",
+    "test-modules/components/complex_params.wat",
     MyWorld,
     main,
-    (u32,), (u32,), (42,)
+    (Vec<u32>,), (Vec<u32>,), ((0..10000).collect::<Vec<u32>>(),)
 }

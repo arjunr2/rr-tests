@@ -1,0 +1,10 @@
+package component:test-package;
+
+interface env {
+    factors: func(x: u32) -> list<u32>;
+}
+
+world my-world {
+    import env;
+    export main: func(x: list<u32>) -> list<u32>;
+}

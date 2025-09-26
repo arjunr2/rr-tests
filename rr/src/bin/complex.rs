@@ -12,5 +12,7 @@ wasmtime_rr_tests::bin! {
     complex,
     "root" in "../test-modules/components/wit/complex-singlereturn-indirect.wit",
     "test-modules/components/complex-singlereturn-indirect.wat",
-    Root
+    Root,
+    main,
+    (u32,), (u32,), (42,)
 }

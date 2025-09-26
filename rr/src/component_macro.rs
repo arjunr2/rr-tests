@@ -25,7 +25,8 @@ macro_rules! bin {
         (config_setup_rr(cli.rr.record_path, cli.rr.replay_path, cli.validate), stub_imports)
     });
 
-    ($bin:ident, $str_world: literal in $path: literal, $file: literal, $rs_world:ident) => (
+    ($bin:ident, $str_world: literal in $path: literal,
+        $file: literal, $rs_world:ident $(, $func:ident, $param_ty:ty, $result_ty:ty, $($input: tt)*)?) => (
         wasmtime_rr_tests::bin!(@uses);
 
         use wasmtime::component::{HasSelf, bindgen};
@@ -51,16 +52,22 @@ macro_rules! bin {
             let mut store = Store::new(&engine, ());
             let instance = linker.instantiate(&mut store, &component)?;
 
-            let func = instance.get_typed_func::<(u32,), (u32,)>(&mut store, "main").expect("main export not found");
-            let input = (42,);
-            let result = func.call(&mut store, input)?;
+            $(
+                let func_name = stringify!($func);
+                let func = instance.get_typed_func::<$param_ty, $result_ty>(&mut store, func_name).expect(&format!("{func_name} export not found"));
+                let result = func.call(&mut store, $($input)*)?;
+                println!("Execution produced result: {:?}", result);
+            )?
+            //let func = instance.get_typed_func::<(u32,), (u32,)>(&mut store, "main").expect("main export not found");
+            //let input = (42,);
+            //let result = func.call(&mut store, input)?;
+            //println!("Execution produced result: {:?}", result);
             // // Untyped
             //let func = instance.get_func(&mut store, "main").expect("main export not found");
             //let input = [component::Val::U32(42)];
             //let mut result = [component::Val::S32(0)];
             //let _  = func.call(&mut store, &input, &mut result)?;
 
-            println!("Execution produced result: {:?}", result);
             Ok(())
         }
     );
