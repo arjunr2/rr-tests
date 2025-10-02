@@ -14,3 +14,4 @@ package = "component:test-package"
 
 [package.metadata.component.dependencies]
 
+[workspace]
