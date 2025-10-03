@@ -3,105 +3,15 @@
 #[macro_export]
 macro_rules! bin {
     (@uses) => {
+        use anyhow::*;
         use std::error::Error;
         use wasmtime::component::{Component, Linker};
+        use wasmtime::component::{ComponentNamedList, HasSelf, Instance, Lift, Lower, bindgen};
         use wasmtime::{Engine, Store};
         use wasmtime_rr_tests::*;
     };
 
-    (@setup) => ({
-        use clap::{Parser};
-        use env_logger;
-
-        env_logger::init();
-
-        let cli = CLI::parse();
-
-        let stub_imports = if cli.rr.replay_path.is_some() {
-            cli.stub_imports
-        } else {
-            false
-        };
-        (config_setup_rr(cli.rr.record_path, cli.rr.replay_path, cli.validate), stub_imports)
-    });
-
-    ($bin:ident, $str_world: literal in $path: literal,
-        $file: literal, $rs_world:ident $(, $func:ident, $param_ty:ty, $result_ty:ty, $($input: tt)*)?) => (
-        wasmtime_rr_tests::bin!(@uses);
-
-        use wasmtime::component::{HasSelf, bindgen};
-
-        bindgen!($str_world in $path);
-
-        fn main() -> Result<(), Box<dyn Error>> {
-            let (config, stub_imports) = bin!(@setup);
-
-            let engine = Engine::new(&config)?;
-            // Don't use CLI.file for components since it's static anyway
-            let component = Component::from_file(&engine, $file)?;
-
-            let mut linker = Linker::new(&engine);
-            // Remove the imports for replay
-            if stub_imports {
-                println!("Stubbing out all imports...");
-                linker.define_unknown_imports_as_traps(&component)?;
-            } else {
-                $rs_world::add_to_linker::<_, HasSelf<_>>(&mut linker, |state| state)?;
-            }
-
-            let mut store = Store::new(&engine, ());
-            let instance = linker.instantiate(&mut store, &component)?;
-
-            $(
-                let func_name = stringify!($func);
-                let func = instance.get_typed_func::<$param_ty, $result_ty>(&mut store, func_name).expect(&format!("{func_name} export not found"));
-                let result = func.call(&mut store, $($input)*)?;
-                println!("Execution produced result: {:?}", result);
-            )?
-            //let func = instance.get_typed_func::<(u32,), (u32,)>(&mut store, "main").expect("main export not found");
-            //let input = (42,);
-            //let result = func.call(&mut store, input)?;
-            //println!("Execution produced result: {:?}", result);
-            // // Untyped
-            //let func = instance.get_func(&mut store, "main").expect("main export not found");
-            //let input = [component::Val::U32(42)];
-            //let mut result = [component::Val::S32(0)];
-            //let _  = func.call(&mut store, &input, &mut result)?;
-
-            Ok(())
-        }
-    );
-
-    ($component:literal $(, $func:ident, $param_ty:ty, $result_ty:ty, $($input: tt)*)?) => (
-        wasmtime_rr_tests::bin!(@uses);
-
-        fn main() -> Result<(), Box<dyn Error>> {
-            let (config, stub_imports) = bin!(@setup);
-
-            let engine = Engine::new(&config)?;
-            let component_wat = $component;
-
-            let component = Component::new(&engine, component_wat)?;
-
-            let mut linker = Linker::new(&engine);
-            // Remove the imports for replay
-            if stub_imports {
-                println!("Stubbing out all imports...");
-                linker.define_unknown_imports_as_traps(&component)?;
-            }
-
-            let mut store = Store::new(&engine, ());
-            // runs the start function
-            let instance = linker.instantiate(&mut store, &component)?;
-            $(
-                let func_name = stringify!($func);
-                let func = instance.get_typed_func::<$param_ty, $result_ty>(&mut store, func_name).expect(&format!("{func_name} export not found"));
-                let result = func.call(&mut store, $($input)*)?;
-                println!("Execution produced result: {:?}", result);
-            )?
-
-            Ok(())
-        }
-    );
-
+    (@add $linker:ident, $st:ident) => {
+        $st::add_to_linker::<_, HasSelf<_>>(&mut $linker, |state| state)
+    };
 }

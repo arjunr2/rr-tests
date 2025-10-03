@@ -8,11 +8,19 @@ impl component::test_package::env::Host for () {
     }
 }
 
-wasmtime_rr_tests::bin! {
-    complex,
-    "root" in "../test-modules/components/wit/complex-singlereturn-indirect.wit",
-    "test-modules/components/complex-singlereturn-indirect.wat",
-    Root,
-    main,
-    (u32,), (u32,), (42,)
+wasmtime_rr_tests::bin!(@uses);
+
+bindgen!(
+    "root" in "../test-modules/components/wit/complex-singlereturn-indirect.wit"
+);
+
+fn main() -> Result<()> {
+    component_run::<_, RunTy, (u32,), (u32,)>(
+        ComponentFmt::File("test-modules/components/complex-singlereturn-indirect.wat"),
+        |mut linker| wasmtime_rr_tests::bin!(@add linker, Root),
+        RunMode::InstantiateAndCallOnce {
+            name: "main",
+            params: (42,),
+        },
+    )
 }
