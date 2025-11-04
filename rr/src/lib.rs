@@ -54,7 +54,7 @@ pub fn cli_setup() -> RecordKnobs<BufWriter<File>, BufReader<File>> {
                     BufReader::new(File::open(&path).unwrap()),
                     ReplaySettings {
                         validate: validate,
-                        ..Default::default()
+                        deser_buffer_size: 1024,
                     },
                 ))
             }),
