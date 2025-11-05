@@ -4,10 +4,26 @@ use env_logger;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
-use wasmtime::component::{Component, ComponentNamedList, Instance, Lift, Linker, Lower};
+use wasmtime::component::{
+    Component, ComponentNamedList, Instance, Lift, Linker, Lower, ResourceTable,
+};
 use wasmtime::{
     Config, Engine, OptLevel, RecordSettings, RecordWriter, ReplayReader, ReplaySettings, Store,
 };
+use wasmtime_wasi::{self, WasiCtx, WasiCtxView, WasiView};
+
+pub struct MyState {
+    ctx: WasiCtx,
+    table: ResourceTable,
+}
+impl WasiView for MyState {
+    fn ctx(&mut self) -> wasmtime_wasi::WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.ctx,
+            table: &mut self.table,
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(version, about = "Test Harness for Recording Program Execution in Wasmtime", long_about=None)]
@@ -92,14 +108,14 @@ pub enum ComponentFmt<'a> {
 pub enum RunMode<'a, Params, T>
 where
     Params: ComponentNamedList + Lower,
-    T: FnOnce(Store<()>, Linker<()>, Component) -> Result<()>,
+    T: FnOnce(Store<MyState>, Linker<MyState>, Component) -> Result<()>,
 {
     InstantiateAndCallOnce { name: &'a str, params: Params },
     InstantiateOnly,
     Custom(T),
 }
 
-pub type RunTy = fn(Store<()>, Linker<()>, Component) -> Result<()>;
+pub type RunTy = fn(Store<MyState>, Linker<MyState>, Component) -> Result<()>;
 
 pub fn component_run<'a, L, T, Params, Results>(
     cfmt: ComponentFmt<'a>,
@@ -107,8 +123,8 @@ pub fn component_run<'a, L, T, Params, Results>(
     mode: RunMode<'a, Params, T>,
 ) -> Result<()>
 where
-    L: FnOnce(&mut Linker<()>) -> Result<()>,
-    T: FnOnce(Store<()>, Linker<()>, Component) -> Result<()>,
+    L: FnOnce(&mut Linker<MyState>) -> Result<()>,
+    T: FnOnce(Store<MyState>, Linker<MyState>, Component) -> Result<()>,
     Params: ComponentNamedList + Lower,
     Results: ComponentNamedList + Lift + Debug,
 {
@@ -121,13 +137,20 @@ where
         ComponentFmt::Raw(s) => Component::new(&engine, s)?,
     };
 
-    let mut linker = Linker::new(&engine);
+    let mut linker = Linker::<MyState>::new(&engine);
+    wasmtime_wasi::p2::add_to_linker_sync(&mut linker)?;
+
+    let mut wasi_builder = WasiCtx::builder();
+    let state = MyState {
+        ctx: wasi_builder.build(),
+        table: ResourceTable::new(),
+    };
 
     let mut store = match knobs.replay {
         // Normal/Recording Store
         None => {
             l(&mut linker)?;
-            let mut store = Store::new(&engine, ());
+            let mut store = Store::new(&engine, state);
             if let Some((writer, settings)) = knobs.record {
                 store.init_recording(writer, settings)?;
             }
@@ -137,7 +160,7 @@ where
         Some((_, _)) => {
             println!("Stubbing out all imports...");
             linker.define_unknown_imports_as_traps(&component)?;
-            let mut store = Store::new(&engine, ());
+            let mut store = Store::new(&engine, state);
             if let Some((reader, settings)) = knobs.replay {
                 store.init_replaying(reader, settings)?;
             }
@@ -160,7 +183,7 @@ where
 }
 
 pub fn call_once<Params, Results>(
-    mut store: Store<()>,
+    mut store: Store<MyState>,
     instance: Instance,
     name: &str,
     params: Params,
@@ -176,8 +199,8 @@ where
 }
 
 pub fn instantiate_and_call_once<Params, Results>(
-    mut store: Store<()>,
-    linker: Linker<()>,
+    mut store: Store<MyState>,
+    linker: Linker<MyState>,
     component: Component,
     name: &str,
     params: Params,

@@ -1,4 +1,4 @@
-impl component::test_package::env::Host for () {
+impl component::test_package::env::Host for MyState {
     fn double(&mut self, x: u32) -> u32 {
         x * 2
     }

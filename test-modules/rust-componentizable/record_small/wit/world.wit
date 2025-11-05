@@ -1,0 +1,18 @@
+package component:test-package;
+
+interface env {
+  record user-profile {
+    id: u64,
+    username: string,
+    tags: list<string>
+  }
+
+  process-profile: func(profile: user-profile) -> user-profile;
+}
+
+world my-world {
+  import env;
+  use env.{user-profile};
+  
+  export main: func(profile: user-profile) -> string;
+}

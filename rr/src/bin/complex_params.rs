@@ -1,6 +1,6 @@
 use prime_factorization::Factorization;
 
-impl component::test_package::env::Host for () {
+impl component::test_package::env::Host for MyState {
     fn factors(&mut self, x: u32) -> Vec<u32> {
         Factorization::run(x).factors
     }
