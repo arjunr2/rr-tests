@@ -32,17 +32,17 @@ pub unsafe fn _export_main_cabi<T: Guest>(arg0: *mut u8) -> *mut u8 {
     let l18 = *arg0.add(8 + 12 * ::core::mem::size_of::<*const u8>()).cast::<usize>();
     let len19 = l18;
     let bytes19 = _rt::Vec::from_raw_parts(l17.cast(), len19, len19);
-    let l20 = *arg0.add(8 + 13 * ::core::mem::size_of::<*const u8>()).cast::<*mut u8>();
-    let l21 = *arg0.add(8 + 14 * ::core::mem::size_of::<*const u8>()).cast::<usize>();
-    let len22 = l21;
-    let bytes22 = _rt::Vec::from_raw_parts(l20.cast(), len22, len22);
-    let l23 = *arg0.add(8 + 15 * ::core::mem::size_of::<*const u8>()).cast::<*mut u8>();
-    let l24 = *arg0.add(8 + 16 * ::core::mem::size_of::<*const u8>()).cast::<usize>();
-    let len25 = l24;
-    let bytes25 = _rt::Vec::from_raw_parts(l23.cast(), len25, len25);
-    let l26 = i32::from(
-        *arg0.add(8 + 17 * ::core::mem::size_of::<*const u8>()).cast::<u8>(),
+    let l20 = i32::from(
+        *arg0.add(8 + 13 * ::core::mem::size_of::<*const u8>()).cast::<u8>(),
     );
+    let l21 = *arg0.add(8 + 14 * ::core::mem::size_of::<*const u8>()).cast::<*mut u8>();
+    let l22 = *arg0.add(8 + 15 * ::core::mem::size_of::<*const u8>()).cast::<usize>();
+    let len23 = l22;
+    let bytes23 = _rt::Vec::from_raw_parts(l21.cast(), len23, len23);
+    let l24 = *arg0.add(8 + 16 * ::core::mem::size_of::<*const u8>()).cast::<*mut u8>();
+    let l25 = *arg0.add(8 + 17 * ::core::mem::size_of::<*const u8>()).cast::<usize>();
+    let len26 = l25;
+    let bytes26 = _rt::Vec::from_raw_parts(l24.cast(), len26, len26);
     let l27 = *arg0.add(8 + 18 * ::core::mem::size_of::<*const u8>()).cast::<f64>();
     let l28 = *arg0.add(16 + 18 * ::core::mem::size_of::<*const u8>()).cast::<i32>();
     let l29 = *arg0.add(16 + 19 * ::core::mem::size_of::<*const u8>()).cast::<*mut u8>();
@@ -108,9 +108,9 @@ pub unsafe fn _export_main_cabi<T: Guest>(arg0: *mut u8) -> *mut u8 {
         age: l13 as u32,
         country: _rt::string_lift(bytes16),
         city: _rt::string_lift(bytes19),
-        postal_code: _rt::string_lift(bytes22),
-        phone: _rt::string_lift(bytes25),
-        is_verified: _rt::bool_lift(l26 as u8),
+        is_verified: _rt::bool_lift(l20 as u8),
+        postal_code: _rt::string_lift(bytes23),
+        phone: _rt::string_lift(bytes26),
         account_balance: l27,
         loyalty_points: l28 as u32,
         subscription_tier: _rt::string_lift(bytes31),
@@ -178,9 +178,9 @@ pub mod component {
                 pub age: u32,
                 pub country: _rt::String,
                 pub city: _rt::String,
+                pub is_verified: bool,
                 pub postal_code: _rt::String,
                 pub phone: _rt::String,
-                pub is_verified: bool,
                 pub account_balance: f64,
                 pub loyalty_points: u32,
                 pub subscription_tier: _rt::String,
@@ -204,9 +204,9 @@ pub mod component {
                         .field("age", &self.age)
                         .field("country", &self.country)
                         .field("city", &self.city)
+                        .field("is-verified", &self.is_verified)
                         .field("postal-code", &self.postal_code)
                         .field("phone", &self.phone)
-                        .field("is-verified", &self.is_verified)
                         .field("account-balance", &self.account_balance)
                         .field("loyalty-points", &self.loyalty_points)
                         .field("subscription-tier", &self.subscription_tier)
@@ -241,9 +241,9 @@ pub mod component {
                         age: age1,
                         country: country1,
                         city: city1,
+                        is_verified: is_verified1,
                         postal_code: postal_code1,
                         phone: phone1,
-                        is_verified: is_verified1,
                         account_balance: account_balance1,
                         loyalty_points: loyalty_points1,
                         subscription_tier: subscription_tier1,
@@ -309,30 +309,30 @@ pub mod component {
                     *ptr0
                         .add(8 + 11 * ::core::mem::size_of::<*const u8>())
                         .cast::<*mut u8>() = ptr7.cast_mut();
+                    *ptr0
+                        .add(8 + 13 * ::core::mem::size_of::<*const u8>())
+                        .cast::<u8>() = (match is_verified1 {
+                        true => 1,
+                        false => 0,
+                    }) as u8;
                     let vec8 = postal_code1;
                     let ptr8 = vec8.as_ptr().cast::<u8>();
                     let len8 = vec8.len();
                     *ptr0
-                        .add(8 + 14 * ::core::mem::size_of::<*const u8>())
+                        .add(8 + 15 * ::core::mem::size_of::<*const u8>())
                         .cast::<usize>() = len8;
                     *ptr0
-                        .add(8 + 13 * ::core::mem::size_of::<*const u8>())
+                        .add(8 + 14 * ::core::mem::size_of::<*const u8>())
                         .cast::<*mut u8>() = ptr8.cast_mut();
                     let vec9 = phone1;
                     let ptr9 = vec9.as_ptr().cast::<u8>();
                     let len9 = vec9.len();
                     *ptr0
-                        .add(8 + 16 * ::core::mem::size_of::<*const u8>())
+                        .add(8 + 17 * ::core::mem::size_of::<*const u8>())
                         .cast::<usize>() = len9;
                     *ptr0
-                        .add(8 + 15 * ::core::mem::size_of::<*const u8>())
+                        .add(8 + 16 * ::core::mem::size_of::<*const u8>())
                         .cast::<*mut u8>() = ptr9.cast_mut();
-                    *ptr0
-                        .add(8 + 17 * ::core::mem::size_of::<*const u8>())
-                        .cast::<u8>() = (match is_verified1 {
-                        true => 1,
-                        false => 0,
-                    }) as u8;
                     *ptr0
                         .add(8 + 18 * ::core::mem::size_of::<*const u8>())
                         .cast::<f64>() = _rt::as_f64(account_balance1);
@@ -499,27 +499,27 @@ pub mod component {
                         .cast::<usize>();
                     let len38 = l37;
                     let bytes38 = _rt::Vec::from_raw_parts(l36.cast(), len38, len38);
-                    let l39 = *ptr17
-                        .add(8 + 13 * ::core::mem::size_of::<*const u8>())
-                        .cast::<*mut u8>();
-                    let l40 = *ptr17
-                        .add(8 + 14 * ::core::mem::size_of::<*const u8>())
-                        .cast::<usize>();
-                    let len41 = l40;
-                    let bytes41 = _rt::Vec::from_raw_parts(l39.cast(), len41, len41);
-                    let l42 = *ptr17
-                        .add(8 + 15 * ::core::mem::size_of::<*const u8>())
-                        .cast::<*mut u8>();
-                    let l43 = *ptr17
-                        .add(8 + 16 * ::core::mem::size_of::<*const u8>())
-                        .cast::<usize>();
-                    let len44 = l43;
-                    let bytes44 = _rt::Vec::from_raw_parts(l42.cast(), len44, len44);
-                    let l45 = i32::from(
+                    let l39 = i32::from(
                         *ptr17
-                            .add(8 + 17 * ::core::mem::size_of::<*const u8>())
+                            .add(8 + 13 * ::core::mem::size_of::<*const u8>())
                             .cast::<u8>(),
                     );
+                    let l40 = *ptr17
+                        .add(8 + 14 * ::core::mem::size_of::<*const u8>())
+                        .cast::<*mut u8>();
+                    let l41 = *ptr17
+                        .add(8 + 15 * ::core::mem::size_of::<*const u8>())
+                        .cast::<usize>();
+                    let len42 = l41;
+                    let bytes42 = _rt::Vec::from_raw_parts(l40.cast(), len42, len42);
+                    let l43 = *ptr17
+                        .add(8 + 16 * ::core::mem::size_of::<*const u8>())
+                        .cast::<*mut u8>();
+                    let l44 = *ptr17
+                        .add(8 + 17 * ::core::mem::size_of::<*const u8>())
+                        .cast::<usize>();
+                    let len45 = l44;
+                    let bytes45 = _rt::Vec::from_raw_parts(l43.cast(), len45, len45);
                     let l46 = *ptr17
                         .add(8 + 18 * ::core::mem::size_of::<*const u8>())
                         .cast::<f64>();
@@ -625,9 +625,9 @@ pub mod component {
                         age: l32 as u32,
                         country: _rt::string_lift(bytes35),
                         city: _rt::string_lift(bytes38),
-                        postal_code: _rt::string_lift(bytes41),
-                        phone: _rt::string_lift(bytes44),
-                        is_verified: _rt::bool_lift(l45 as u8),
+                        is_verified: _rt::bool_lift(l39 as u8),
+                        postal_code: _rt::string_lift(bytes42),
+                        phone: _rt::string_lift(bytes45),
                         account_balance: l46,
                         loyalty_points: l47 as u32,
                         subscription_tier: _rt::string_lift(bytes50),
@@ -827,15 +827,15 @@ pub(crate) use __export_my_world_impl as export;
 pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 549] = *b"\
 \0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xa6\x03\x01A\x02\x01\
 A\x06\x01B\x06\x01ps\x01pw\x01r\x13\x02idw\x08usernames\x05emails\x0afirst-names\
-\x09last-names\x03agey\x07countrys\x04citys\x0bpostal-codes\x05phones\x0bis-veri\
-fied\x7f\x0faccount-balanceu\x0eloyalty-pointsy\x11subscription-tiers\x14last-lo\
-gin-timestampw\x11registration-dates\x04tags\0\x10purchase-history\x01\x0bprefer\
-ences\0\x04\0\x0cuser-profile\x03\0\x02\x01@\x01\x07profile\x03\0\x03\x04\0\x0fp\
-rocess-profile\x01\x04\x03\0\x1acomponent:test-package/env\x05\0\x02\x03\0\0\x0c\
-user-profile\x03\0\x0cuser-profile\x03\0\x01\x01@\x01\x07profile\x02\0s\x04\0\x04\
-main\x01\x03\x04\0\x1fcomponent:test-package/my-world\x04\0\x0b\x0e\x01\0\x08my-\
-world\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.227.\
-1\x10wit-bindgen-rust\x060.41.0";
+\x09last-names\x03agey\x07countrys\x04citys\x0bis-verified\x7f\x0bpostal-codes\x05\
+phones\x0faccount-balanceu\x0eloyalty-pointsy\x11subscription-tiers\x14last-logi\
+n-timestampw\x11registration-dates\x04tags\0\x10purchase-history\x01\x0bpreferen\
+ces\0\x04\0\x0cuser-profile\x03\0\x02\x01@\x01\x07profile\x03\0\x03\x04\0\x0fpro\
+cess-profile\x01\x04\x03\0\x1acomponent:test-package/env\x05\0\x02\x03\0\0\x0cus\
+er-profile\x03\0\x0cuser-profile\x03\0\x01\x01@\x01\x07profile\x02\0s\x04\0\x04m\
+ain\x01\x03\x04\0\x1fcomponent:test-package/my-world\x04\0\x0b\x0e\x01\0\x08my-w\
+orld\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.227.1\
+\x10wit-bindgen-rust\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

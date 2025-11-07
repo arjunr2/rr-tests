@@ -1,0 +1,47 @@
+package component:test-package;
+
+interface env {
+    // Nested record for address
+    record address {
+        street: string,
+        city: string,
+        state: string,
+        country: string,
+        postal-code: string,
+    }
+
+    // Record with nested types
+    record order-info {
+        order-id: string,
+        total-amount: f64,
+        items: list<string>,
+        shipping-address: address,
+    }
+
+    // Nested variant
+    variant payment-method {
+        credit-card(string),
+        paypal(string),
+        bank-transfer,
+        cash,
+    }
+
+    // Main variant with various types and nesting
+    variant data-payload {
+        order(order-info),
+        address-update(address),
+        simple-message(string),
+        numeric-data(list<s64>),
+        payment(payment-method),
+    }
+
+    // Import function that processes the variant
+    process-data: func(input: data-payload) -> data-payload;
+}
+
+world my-world {
+    import env;
+    use env.{data-payload};
+    
+    export main: func(data: data-payload) -> string;
+}

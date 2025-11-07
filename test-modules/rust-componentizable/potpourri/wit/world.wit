@@ -1,0 +1,41 @@
+package component:test-package;
+
+interface env {
+  // Small record that exercises WIT types (7 fields including result)
+  record pot-record {
+    id: u64,
+    name: string,
+    active: bool,
+    score: f32,
+    opt-tags: option<list<string>>,
+    payload: pot-payload,
+    validation: result<string, string>,
+  }
+
+  record small-record {
+    count: u32,
+    ratio: f64,
+  }
+
+  variant payment-method {
+    credit-card(string),
+    paypal(string),
+    cash,
+  }
+
+  variant pot-payload {
+    numbers(list<s64>),
+    small(small-record),
+    payment(payment-method),
+    text(string),
+  }
+
+  process-pot: func(input: pot-record) -> pot-record;
+}
+
+world my-world {
+  import env;
+  use env.{pot-record};
+
+  export main: func(p: pot-record) -> string;
+}

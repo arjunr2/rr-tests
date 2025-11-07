@@ -49,6 +49,16 @@ impl Guest for Component {
             processed.preferences.join(",")
         );
 
+        //let encoding = format!(
+        //    "PROFILE_V1|{}|{}|{}|{}|{}|verified:{}",
+        //    processed.id,
+        //    processed.username,
+        //    processed.email,
+        //    processed.first_name,
+        //    processed.last_name,
+        //    processed.is_verified,
+        //);
+
         encoding
     }
 }
