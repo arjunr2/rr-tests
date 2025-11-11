@@ -20,7 +20,7 @@ fn host_complex_fn(p1: i32, p2: i64) -> (i32, i64, f32) {
 //}
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let knobs = cli_setup();
+    let knobs = record_cli_setup();
 
     let engine = Engine::new(&knobs.config)?;
     let module = Module::from_file(&engine, knobs.cli_file)?;
@@ -37,9 +37,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     //}
 
     let mut store = Store::new(&engine, ());
-    if let Some((writer, settings)) = knobs.record {
-        store.init_recording(writer, settings)?;
-    }
+    store.init_recording(knobs.buf, knobs.settings)?;
+
     let instance = linker.instantiate(&mut store, &module)?;
 
     let run = instance.get_typed_func::<i32, i32>(&mut store, "main")?;

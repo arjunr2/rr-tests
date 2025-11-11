@@ -3,13 +3,11 @@ use clap::Parser;
 use env_logger;
 use std::fmt::Debug;
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::BufWriter;
 use wasmtime::component::{
     Component, ComponentNamedList, Instance, Lift, Linker, Lower, ResourceTable,
 };
-use wasmtime::{
-    Config, Engine, OptLevel, RecordSettings, RecordWriter, ReplayReader, ReplaySettings, Store,
-};
+use wasmtime::{Config, Engine, OptLevel, RRConfig, RecordSettings, Store};
 use wasmtime_wasi::{self, WasiCtx, WasiCtxView, WasiView};
 
 pub struct MyState {
@@ -32,25 +30,21 @@ pub struct RecordCLI {
     pub file: String,
 
     #[arg(short = 'c', long = "record")]
-    pub record_path: Option<String>,
+    pub record_path: String,
 
     #[arg(short = 'v', long = "validate", default_value_t = false)]
     pub validate: bool,
-
-    /// TODO: Remove all replay stuff once we have a replay driver
-    #[arg(short = 'p', long = "replay", default_value_t = false)]
-    pub replay: bool,
 }
 
 /// TODO: Remove all replay stuff once we have a replay driver
-pub struct RecordKnobs<R: RecordWriter, P: ReplayReader> {
+pub struct Knobs<R, S> {
     pub config: Config,
-    pub record: Option<(R, RecordSettings)>,
-    pub replay: Option<(P, ReplaySettings)>,
+    pub buf: R,
+    pub settings: S,
     pub cli_file: String,
 }
 
-pub fn cli_setup() -> RecordKnobs<BufWriter<File>, BufReader<File>> {
+pub fn record_cli_setup() -> Knobs<BufWriter<File>, RecordSettings> {
     env_logger::init();
 
     let cli = RecordCLI::parse();
@@ -59,44 +53,19 @@ pub fn cli_setup() -> RecordKnobs<BufWriter<File>, BufReader<File>> {
 
     // Config
     let mut config = Config::default();
-    config.debug_info(true).cranelift_opt_level(OptLevel::None);
+    config
+        .debug_info(true)
+        .cranelift_opt_level(OptLevel::None)
+        .rr(RRConfig::Recording);
 
-    let (record, replay) = if cli.replay {
-        config.replaying(true);
-        (
-            None,
-            record_path.and_then(|path| {
-                Some((
-                    BufReader::new(File::open(&path).unwrap()),
-                    ReplaySettings {
-                        validate: validate,
-                        deser_buffer_size: 1024,
-                    },
-                ))
-            }),
-        )
-    } else {
-        config.recording(true);
-        (
-            record_path.and_then(|path| {
-                Some((
-                    BufWriter::new(File::create(&path).unwrap()),
-                    RecordSettings {
-                        add_validation: validate,
-                        ..Default::default()
-                    },
-                ))
-            }),
-            None,
-        )
-    };
-
-    let cli_file = cli.file.clone();
-    RecordKnobs {
+    Knobs {
         config,
-        record,
-        replay,
-        cli_file,
+        buf: BufWriter::new(File::create(&record_path).unwrap()),
+        settings: RecordSettings {
+            add_validation: validate,
+            ..Default::default()
+        },
+        cli_file: cli.file.clone(),
     }
 }
 
@@ -128,7 +97,7 @@ where
     Params: ComponentNamedList + Lower,
     Results: ComponentNamedList + Lift + Debug,
 {
-    let knobs = cli_setup();
+    let knobs = record_cli_setup();
 
     let engine = Engine::new(&knobs.config)?;
     let component = match cfmt {
@@ -146,27 +115,12 @@ where
         table: ResourceTable::new(),
     };
 
-    let mut store = match knobs.replay {
-        // Normal/Recording Store
-        None => {
-            l(&mut linker)?;
-            let mut store = Store::new(&engine, state);
-            if let Some((writer, settings)) = knobs.record {
-                store.init_recording(writer, settings)?;
-            }
-            store
-        }
-        // Replay Store: Stub out all imports for replay
-        Some((_, _)) => {
-            println!("Stubbing out all imports...");
-            linker.define_unknown_imports_as_traps(&component)?;
-            let mut store = Store::new(&engine, state);
-            if let Some((reader, settings)) = knobs.replay {
-                store.init_replaying(reader, settings)?;
-            }
-            store
-        }
-    };
+    // Linker setup
+    l(&mut linker)?;
+
+    // Store setup
+    let mut store = Store::new(&engine, state);
+    store.init_recording(knobs.buf, knobs.settings)?;
 
     match mode {
         RunMode::InstantiateAndCallOnce { name, params } => {

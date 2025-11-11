@@ -2,6 +2,10 @@
 name = "wasmtime-rr-tests"
 edition = "2024"
 
+[[bin]]
+name = "replay"
+path = "src/replay.rs"
+
 [dependencies]
 anyhow = "1.0.100"
 clap.workspace = true
