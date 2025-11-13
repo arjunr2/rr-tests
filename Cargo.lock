@@ -2293,6 +2293,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_derive",
+ "sha2",
  "smallvec",
  "target-lexicon",
  "wasm-encoder",
