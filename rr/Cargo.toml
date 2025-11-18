@@ -11,5 +11,9 @@ anyhow = "1.0.100"
 clap.workspace = true
 env_logger = "0.11.8"
 prime_factorization.workspace = true
-wasmtime = { path = "../../wasmtime-rr-prototyping/crates/wasmtime", features = ["default", "rr-component", "rr-validate"] }
+wasmtime = { path = "../../wasmtime-rr-prototyping/crates/wasmtime", features = ["default"] }
 wasmtime-wasi = { path = "../../wasmtime-rr-prototyping/crates/wasi", features = ["default"] }
+
+[features]
+rr-component = ["wasmtime/rr-component"]
+default = ["rr-component"]

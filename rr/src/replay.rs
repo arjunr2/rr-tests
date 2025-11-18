@@ -3,9 +3,9 @@ use clap::Parser;
 use env_logger;
 use std::fs::File;
 use std::io::BufReader;
-use wasmtime::{
-    Config, Engine, OptLevel, RRConfig, ReplayEnvironment, ReplaySettings, component::Component,
-};
+#[cfg(feature = "rr-component")]
+use wasmtime::component::Component;
+use wasmtime::{Config, Engine, OptLevel, RRConfig, ReplayEnvironment, ReplaySettings};
 
 use wasmtime_rr_tests::Knobs;
 
@@ -51,16 +51,22 @@ fn main() -> Result<()> {
     let config = knobs.config;
     let engine = Engine::new(&config)?;
     let mut renv = ReplayEnvironment::new(&engine, knobs.settings);
+    let mut was_component = false;
+    #[cfg(feature = "rr-component")]
     if let Ok(component) = Component::from_file(&engine, &knobs.cli_file) {
         renv.add_component(component);
-    } else if let Ok(module) = wasmtime::Module::from_file(&engine, &knobs.cli_file) {
-        renv.add_module(module);
-    } else {
-        bail!(
-            "{} file provided is neither a Wasm component nor a module",
-            &knobs.cli_file
-        );
-    };
+        was_component = true;
+    }
+    if !was_component {
+        if let Ok(module) = wasmtime::Module::from_file(&engine, &knobs.cli_file) {
+            renv.add_module(module);
+        } else {
+            bail!(
+                "{} file provided is neither a Wasm component nor a module",
+                &knobs.cli_file
+            );
+        }
+    }
     let mut instance = renv.instantiate(knobs.buf)?;
     instance.run_to_completion()?;
     println!("Replay completed successfully");
