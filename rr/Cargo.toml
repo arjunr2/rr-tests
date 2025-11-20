@@ -16,4 +16,5 @@ wasmtime-wasi = { path = "../../wasmtime-rr-prototyping/crates/wasi", features =
 
 [features]
 rr-component = ["wasmtime/rr-component"]
+rr = ["wasmtime/rr"]
 default = ["rr-component"]
