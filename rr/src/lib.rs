@@ -76,10 +76,18 @@ pub enum ComponentFmt<'a> {
 
 pub enum RunMode<'a, Params, T>
 where
-    Params: ComponentNamedList + Lower,
+    Params: ComponentNamedList + Lower + Clone,
     T: FnOnce(Store<MyState>, Linker<MyState>, Component) -> Result<()>,
 {
-    InstantiateAndCallOnce { name: &'a str, params: Params },
+    InstantiateAndCallOnce {
+        name: &'a str,
+        params: Params,
+    },
+    InstantiateAndCallNTimes {
+        name: &'a str,
+        params: Params,
+        n: u32,
+    },
     InstantiateOnly,
     Custom(T),
 }
@@ -94,7 +102,7 @@ pub fn component_run<'a, L, T, Params, Results>(
 where
     L: FnOnce(&mut Linker<MyState>) -> Result<()>,
     T: FnOnce(Store<MyState>, Linker<MyState>, Component) -> Result<()>,
-    Params: ComponentNamedList + Lower,
+    Params: ComponentNamedList + Lower + Clone,
     Results: ComponentNamedList + Lift + Debug,
 {
     let knobs = record_cli_setup();
@@ -131,14 +139,20 @@ where
         RunMode::InstantiateOnly => {
             let _ = linker.instantiate(&mut store, &component)?;
         }
+        RunMode::InstantiateAndCallNTimes { name, params, n } => {
+            let result = instantiate_and_call_n_times::<_, Results>(
+                store, linker, component, name, params, n,
+            )?;
+            println!("Call produced result: {:?}", result);
+        }
         RunMode::Custom(x) => x(store, linker, component)?,
     }
     Ok(())
 }
 
 pub fn call_once<Params, Results>(
-    mut store: Store<MyState>,
-    instance: Instance,
+    mut store: &mut Store<MyState>,
+    instance: &mut Instance,
     name: &str,
     params: Params,
 ) -> Result<Results>
@@ -149,7 +163,9 @@ where
     let func = instance
         .get_typed_func::<Params, Results>(&mut store, name)
         .expect(&format!("{} export not found", name));
-    Ok(func.call(&mut store, params)?)
+    let result = func.call(&mut store, params)?;
+    func.post_return(&mut store)?;
+    Ok(result)
 }
 
 pub fn instantiate_and_call_once<Params, Results>(
@@ -163,8 +179,27 @@ where
     Params: ComponentNamedList + Lower,
     Results: ComponentNamedList + Lift,
 {
-    let instance = linker.instantiate(&mut store, &component)?;
-    call_once::<Params, Results>(store, instance, name, params)
+    let mut instance = linker.instantiate(&mut store, &component)?;
+    call_once::<Params, Results>(&mut store, &mut instance, name, params)
+}
+
+pub fn instantiate_and_call_n_times<Params, Results>(
+    mut store: Store<MyState>,
+    linker: Linker<MyState>,
+    component: Component,
+    name: &str,
+    params: Params,
+    n: u32,
+) -> Result<Results>
+where
+    Params: ComponentNamedList + Lower + Clone,
+    Results: ComponentNamedList + Lift,
+{
+    let mut instance = linker.instantiate(&mut store, &component)?;
+    for _ in 1..n - 1 {
+        let _ = call_once::<Params, Results>(&mut store, &mut instance, name, params.clone())?;
+    }
+    call_once::<Params, Results>(&mut store, &mut instance, name, params.clone())
 }
 
 pub mod component_macro;

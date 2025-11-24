@@ -16,9 +16,10 @@ fn main() -> Result<()> {
     component_run::<_, RunTy, (u32,), (u32,)>(
         ComponentFmt::File("test-modules/components/multi_return.wat"),
         |mut linker| wasmtime_rr_tests::bin!(@add linker, MyWorld),
-        RunMode::InstantiateAndCallOnce {
+        RunMode::InstantiateAndCallNTimes {
             name: "main",
             params: (42,),
+            n: 3,
         },
     )
 }
