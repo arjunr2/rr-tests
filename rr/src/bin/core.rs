@@ -37,7 +37,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     //}
 
     let mut store = Store::new(&engine, ());
-    store.init_recording(knobs.buf, knobs.settings)?;
+    store.record(knobs.buf, knobs.settings)?;
 
     let instance = linker.instantiate(&mut store, &module)?;
 

@@ -128,7 +128,7 @@ where
 
     // Store setup
     let mut store = Store::new(&engine, state);
-    store.init_recording(knobs.buf, knobs.settings)?;
+    store.record(knobs.buf, knobs.settings)?;
 
     match mode {
         RunMode::InstantiateAndCallOnce { name, params } => {

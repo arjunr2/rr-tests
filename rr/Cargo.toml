@@ -15,6 +15,5 @@ wasmtime = { path = "../../wasmtime-rr-prototyping/crates/wasmtime", features = 
 wasmtime-wasi = { path = "../../wasmtime-rr-prototyping/crates/wasi", features = ["default"] }
 
 [features]
-rr-component = ["wasmtime/rr-component"]
 rr = ["wasmtime/rr"]
-default = ["rr-component"]
+default = ["rr"]
