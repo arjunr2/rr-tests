@@ -14,13 +14,13 @@ const KB: usize = 1024;
 struct CLI {
     #[arg(short, long, default_value_t = 4096 * MB)]
     pub size: usize,
-    #[arg(short, long, default_value_t = 50_000)]
+    #[arg(short, long, default_value_t = 100_000)]
     pub num_ops: u32,
     #[arg(short = 'l', long = "slice-size", default_value_t = 4 * KB)]
     pub max_slice_size: usize,
     /// The percentage of total system memory to hog for interference
-    #[arg(short, long)]
-    pub memory_interference: Option<usize>,
+    #[arg(short, long, default_value_t = false)]
+    pub memory_interference: bool,
 }
 
 fn get_total_memory() -> usize {
@@ -31,22 +31,22 @@ fn get_total_memory() -> usize {
     }
 }
 
-fn run_memory_hog(percent: usize) -> Result<(*mut libc::c_void, usize)> {
-    log::info!("Hogging {}% of memory", percent);
-
+fn run_memory_hog(alloc_size: usize) -> Result<(*mut libc::c_void, usize)> {
     let total_mem = get_total_memory();
-    let bytes = (total_mem * percent) / 100;
+    // Hog a bit more than physical memory available to
+    let bytes_to_hog = (total_mem as f64 * 0.98) as usize - alloc_size;
     // Allocate memory
     let ptr = unsafe {
         mmap_anonymous(
             ptr::null_mut(),
-            bytes,
+            bytes_to_hog,
             ProtFlags::READ | ProtFlags::WRITE,
             MapFlags::PRIVATE,
         )?
     };
+    log::info!("Hogging memory...");
 
-    let slice = unsafe { std::slice::from_raw_parts_mut(ptr as *mut u8, bytes) };
+    let slice = unsafe { std::slice::from_raw_parts_mut(ptr as *mut u8, bytes_to_hog) };
     let page_size = 4096;
 
     // Touch memory to ensure physical allocation
@@ -54,7 +54,7 @@ fn run_memory_hog(percent: usize) -> Result<(*mut libc::c_void, usize)> {
         *s = 1;
     });
 
-    Ok((ptr, bytes))
+    Ok((ptr, bytes_to_hog))
 }
 
 fn get_random_subslice<'a, R: Rng>(
@@ -106,9 +106,9 @@ fn main() -> Result<()> {
     // True random RNG
     let mut op_rng = thread_rng();
 
-    let hog_mem = if let Some(percent) = cli.memory_interference {
+    let hog_mem = if cli.memory_interference {
         // We just need this to stay for interference
-        Some(run_memory_hog(percent)?)
+        Some(run_memory_hog(cli.size)?)
     } else {
         None
     };
