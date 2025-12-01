@@ -3,6 +3,7 @@ use clap::Parser;
 use log;
 use rand::prelude::*;
 use rand::{Rng, rngs::StdRng};
+use rayon::prelude::*;
 use rustix::mm::{MapFlags, ProtFlags, mmap_anonymous, munmap};
 use std::ptr;
 
@@ -15,8 +16,45 @@ struct CLI {
     pub size: usize,
     #[arg(short, long, default_value_t = 50_000)]
     pub num_ops: u32,
-    #[arg(short, long, default_value_t = 4 * KB)]
+    #[arg(short = 'l', long = "slice-size", default_value_t = 4 * KB)]
     pub max_slice_size: usize,
+    /// The percentage of total system memory to hog for interference
+    #[arg(short, long)]
+    pub memory_interference: Option<usize>,
+}
+
+fn get_total_memory() -> usize {
+    unsafe {
+        let pages = libc::sysconf(libc::_SC_PHYS_PAGES);
+        let page_size = libc::sysconf(libc::_SC_PAGESIZE);
+        (pages as usize) * (page_size as usize)
+    }
+}
+
+fn run_memory_hog(percent: usize) -> Result<(*mut libc::c_void, usize)> {
+    log::info!("Hogging {}% of memory", percent);
+
+    let total_mem = get_total_memory();
+    let bytes = (total_mem * percent) / 100;
+    // Allocate memory
+    let ptr = unsafe {
+        mmap_anonymous(
+            ptr::null_mut(),
+            bytes,
+            ProtFlags::READ | ProtFlags::WRITE,
+            MapFlags::PRIVATE,
+        )?
+    };
+
+    let slice = unsafe { std::slice::from_raw_parts_mut(ptr as *mut u8, bytes) };
+    let page_size = 4096;
+
+    // Touch memory to ensure physical allocation
+    slice.par_iter_mut().step_by(page_size).for_each(|s| {
+        *s = 1;
+    });
+
+    Ok((ptr, bytes))
 }
 
 fn get_random_subslice<'a, R: Rng>(
@@ -34,6 +72,14 @@ fn get_random_subslice<'a, R: Rng>(
     let len = rng.gen_range(0..=std::cmp::min(max_len, max_subslice_size));
     &mut src[offset..offset + len]
 }
+
+/// === Tracking and Snapshotting ===
+/// 1. Clear all written/soft dirty bits
+/// - Write "4" to /proc/PID/clear_refs
+///
+/// 2. Perform operations (reads/writes) on the memory region
+/// -
+///
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -60,6 +106,13 @@ fn main() -> Result<()> {
     // True random RNG
     let mut op_rng = thread_rng();
 
+    let hog_mem = if let Some(percent) = cli.memory_interference {
+        // We just need this to stay for interference
+        Some(run_memory_hog(percent)?)
+    } else {
+        None
+    };
+
     log::info!("Performing {} operations...", cli.num_ops);
     for i in 0..cli.num_ops {
         // Perform a read: calculate a simple checksum
@@ -77,6 +130,12 @@ fn main() -> Result<()> {
     log::info!("Completed all operations; unmapping");
     // Clean up
     unsafe {
+        if let Some((hog_ptr, hog_size)) = hog_mem {
+            // Do a random write
+            let x = hog_ptr.clone();
+            (x as *mut u8).add(35).write(127);
+            munmap(hog_ptr, hog_size)?;
+        }
         munmap(ptr, cli.size)?;
     }
 
