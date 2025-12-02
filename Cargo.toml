@@ -2,6 +2,7 @@
 members = [
     "rr",
     "stock",
+    "snapshot",
     "wasi-modules"
 ]
 resolver = "3"
@@ -13,3 +14,5 @@ version = "0.0.1"
 [workspace.dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
 prime_factorization = "1.0.5"
+env_logger = "0.11.8"
+anyhow = "1.0.100"

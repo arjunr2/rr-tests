@@ -6,22 +6,13 @@ edition = "2024"
 name = "replay"
 path = "src/replay.rs"
 
-[[bin]]
-name = "snapshot"
-path = "src/snapshot.rs"
-
 [dependencies]
-anyhow = "1.0.100"
+anyhow.workspace = true
 clap.workspace = true
-env_logger = "0.11.8"
+env_logger.workspace = true
 prime_factorization.workspace = true
 wasmtime = { path = "../../wasmtime-rr-prototyping/crates/wasmtime", features = ["default"] }
 wasmtime-wasi = { path = "../../wasmtime-rr-prototyping/crates/wasi", features = ["default"] }
-rand = "0.8"
-rustix = { version = "0.38", features = ["mm"] }
-log = "0.4.28"
-libc = "0.2.177"
-rayon = "1.11.0"
 
 [features]
 rr = ["wasmtime/rr"]
