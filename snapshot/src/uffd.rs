@@ -1,7 +1,6 @@
 use anyhow::Result;
 use libc::{SYS_userfaultfd, syscall};
 use std::io;
-use std::ops::Range;
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 
 impl AsRawFd for Uffd {

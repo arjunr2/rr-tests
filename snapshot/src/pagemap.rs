@@ -274,6 +274,6 @@ pub fn clear_soft_dirty_global() -> Result<()> {
     file.write_all(b"4")?;
     file.flush()?;
     drop(file);
-    thread::sleep(Duration::from_millis(20));
+    thread::sleep(Duration::from_micros(200));
     Ok(())
 }

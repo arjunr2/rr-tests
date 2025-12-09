@@ -46,6 +46,7 @@ struct CLI {
 }
 
 /// Touch all the pages in the slice so they are physically allocated
+#[allow(dead_code)]
 fn touch_pages(bytes: &mut [u8], write: bool) {
     bytes.par_iter_mut().step_by(page_size()).for_each(|s| {
         if write {
@@ -119,9 +120,15 @@ fn run_harness(
 }
 
 /// This method uses the soft-dirty tracking mechanism to perform dirty page tracking
-fn soft_dirty_benchmark(slice: &mut [u8], cli: &CLI, mut srng: StdRng) -> Result<Duration> {
-    // Pagemap scan to see written/soft-dirty pages
-    let pm_arg_builder = PmScanArgBuilder::new()
+fn soft_dirty_benchmark(
+    slice: &mut [u8],
+    mut run: impl FnMut(&mut [u8]) -> Result<()>,
+    verbose: bool,
+) -> Result<Duration> {
+    // Pagemap scan to see dirty pages
+    // PFNZERO is inverted because newly mapped pages have WRITTEN set even after a read.
+    // By inverting PFNZERO, we filter out those pages and only get pages that were actually written to afterwards.
+    let mut pm_arg = PmScanArgBuilder::new()
         .addr_range_from_slice(slice)
         .category_mask(Categories::SOFT_DIRTY | Categories::WRITTEN)
         .return_mask(
@@ -133,36 +140,42 @@ fn soft_dirty_benchmark(slice: &mut [u8], cli: &CLI, mut srng: StdRng) -> Result
                 | Categories::SWAPPED
                 | Categories::PFNZERO
                 | Categories::WPALLOWED,
-        );
+        )
+        .finish();
 
-    let mut pm_arg = pm_arg_builder.clone().finish();
-
-    // TBD Weird Bug: Idk what happens with soft dirty here, but sometimes it clears, sometimes it doesn't
-    //log::info!("Initial Scan after mapping: {}", pm_arg.run_pagemap_scan()?);
+    // TBD Weird Bug: Idk what happens with soft dirty here, but if we have a newly mapped
+    // soft-dirty pages, it sometimes clears and sometimes it doesn't...
+    // It seems to work consistently if we touch the pages first though..
     touch_pages(slice, false);
-    // Initialize by clearing soft dirty
     clear_soft_dirty_global()?;
 
-    run_harness(
-        slice,
-        cli.num_ops,
-        Normal::new(0.0, cli.stddev.unwrap_or((cli.size >> 15) as f64))?,
-        &mut srng,
-    )?;
+    // Run and time the dirty page tracking loop
+    run(slice)?;
 
-    let start_time = Instant::now();
-    let scan_res = pm_arg.run_pagemap_scan()?;
-    clear_soft_dirty_global()?;
-    let duration = start_time.elapsed();
-    if cli.verbose {
-        log::info!("After harness: {}", scan_res);
+    let (scan_res, duration) = {
+        let start_time = Instant::now();
+        let res = pm_arg.run_pagemap_scan()?;
+        clear_soft_dirty_global()?;
+        (res, start_time.elapsed())
+    };
+
+    if verbose {
+        log::info!("Post harness state: {}", scan_res);
     }
-    log::info!("After soft-dirty clear: {}", pm_arg.run_pagemap_scan()?);
+    clear_soft_dirty_global()?;
+    log::info!(
+        "Reset state (post soft-dirty clear): {}",
+        pm_arg.run_pagemap_scan()?
+    );
     Ok(duration)
 }
 
 /// This method uses the written bit in the PTE with Uffd and PAGEMAP_SCAN
-fn uffd_written_benchmark(slice: &mut [u8], cli: &CLI, mut srng: StdRng) -> Result<Duration> {
+fn uffd_written_benchmark(
+    slice: &mut [u8],
+    mut run: impl FnMut(&mut [u8]) -> Result<()>,
+    verbose: bool,
+) -> Result<Duration> {
     let mut uffd = create_uffd(UffdFlags::UFFD_USER_MODE_ONLY)?;
     let api = uffd.api(UffdFeature::WP_ASYNC | UffdFeature::WP_UNPOPULATED)?;
     if !api.ioctls().contains(
@@ -185,7 +198,44 @@ fn uffd_written_benchmark(slice: &mut [u8], cli: &CLI, mut srng: StdRng) -> Resu
             reg
         ));
     }
-    Ok(Duration::ZERO)
+
+    // Pagemap scan to see dirty pages (similar to `soft_dirty_benchmark`)
+    let pm_arg_builder = PmScanArgBuilder::new()
+        .addr_range_from_slice(slice)
+        .flags(Flags::PM_SCAN_WP_MATCHING | Flags::PM_SCAN_CHECK_WPASYNC)
+        .category_mask(Categories::WRITTEN | Categories::PFNZERO)
+        .category_inverted(Categories::PFNZERO)
+        .return_mask(
+            Categories::WRITTEN
+                | Categories::SOFT_DIRTY
+                | Categories::PRESENT
+                | Categories::HUGE
+                | Categories::FILE
+                | Categories::SWAPPED
+                | Categories::PFNZERO
+                | Categories::WPALLOWED,
+        );
+    let mut pm_arg = pm_arg_builder.clone().finish();
+
+    // Run and time the dirty page tracking loop
+    run(slice)?;
+
+    let (scan_res, duration) = {
+        let start_time = Instant::now();
+        let res = pm_arg.run_pagemap_scan()?;
+        (res, start_time.elapsed())
+    };
+
+    if verbose {
+        log::info!("Post harness state: {}", scan_res);
+    }
+    // To view the reset state, create a new pm_arg without write protect (just gets the state)
+    let mut pm_arg_nowp = pm_arg_builder.clone().flags(Flags::empty()).finish();
+    log::info!(
+        "Reset State (post WP clear by scan): {}",
+        pm_arg_nowp.run_pagemap_scan()?
+    );
+    Ok(duration)
 }
 
 fn main() -> Result<()> {
@@ -210,11 +260,19 @@ fn main() -> Result<()> {
     // Create a slice from the raw parts
     let slice = unsafe { std::slice::from_raw_parts_mut(ptr.cast::<u8>().as_ptr(), cli.size) };
     // Initialize with random data using a seeded RNG
-    let srng = StdRng::seed_from_u64(cli.seed);
+    let mut srng = StdRng::seed_from_u64(cli.seed);
 
+    let run_call = |s: &mut [u8]| {
+        run_harness(
+            s,
+            cli.num_ops,
+            Normal::new(0.0, cli.stddev.unwrap_or((cli.size >> 15) as f64))?,
+            &mut srng,
+        )
+    };
     let duration = match cli.strategy {
-        DirtyTrackingStrategy::SoftDirty => soft_dirty_benchmark(slice, &cli, srng)?,
-        DirtyTrackingStrategy::UffdWritten => uffd_written_benchmark(slice, &cli, srng)?,
+        DirtyTrackingStrategy::SoftDirty => soft_dirty_benchmark(slice, run_call, cli.verbose)?,
+        DirtyTrackingStrategy::UffdWritten => uffd_written_benchmark(slice, run_call, cli.verbose)?,
     };
 
     log::info!("Scan took {:?}", duration.as_micros());
