@@ -6,8 +6,10 @@ use nix::sys::mman::{MapFlags, ProtFlags, mmap_anonymous, mprotect, munmap};
 use rand::prelude::*;
 use rand::{Rng, rngs::StdRng};
 use rand_distr::{Distribution, Normal};
-use rayon::prelude::*;
+use serde::Serialize;
 use std::cmp::{max, min};
+use std::fs::File;
+use std::io::BufWriter;
 use std::ops::Range;
 use std::time::{Duration, Instant};
 
@@ -22,7 +24,7 @@ const MB: usize = 1024 * 1024;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 enum DirtyTrackingStrategy {
     SoftDirty,
-    UffdWritten,
+    Uffd,
 }
 
 #[derive(Parser)]
@@ -39,20 +41,35 @@ struct CLI {
     /// The stddev of the normal distribution sampled from for random walk
     #[arg(short = 'd', long = "stddev")]
     pub stddev: Option<f64>,
-    #[arg(value_enum)]
-    pub strategy: DirtyTrackingStrategy,
     #[arg(short, long, default_value_t = false)]
     pub verbose: bool,
+    // Number of times to run the benchmark
+    #[arg(short, long, default_value_t = 1)]
+    pub runs: u32,
+    /// Output file to write timing results to
+    #[arg(short, long)]
+    pub output: Option<String>,
+    #[arg(value_enum)]
+    pub strategy: DirtyTrackingStrategy,
 }
 
+#[derive(Serialize)]
+struct ResultStat {
+    pub scan: PageMapScanResult,
+    pub duration: Duration,
+}
+
+fn page_iter(bytes: &mut [u8]) -> impl Iterator<Item = &mut [u8]> {
+    bytes.chunks_mut(page_size())
+}
 /// Touch all the pages in the slice so they are physically allocated
 #[allow(dead_code)]
 fn touch_pages(bytes: &mut [u8], write: bool) {
-    bytes.par_iter_mut().step_by(page_size()).for_each(|s| {
+    page_iter(bytes).for_each(|s| {
         if write {
-            *s = 1;
+            s[0] = 1;
         } else {
-            let _acc = *s as usize;
+            let _acc = s[0] as usize;
         };
     });
 }
@@ -92,29 +109,22 @@ fn run_harness(
     let dist_len = Normal::new(2.0, 1.0)?;
     let mut read_start: usize = slice.len() / 2;
     let mut write_start: usize = slice.len() / 2;
-    for i in 0..num_ops {
+    for _ in 0..num_ops {
         // Perform a read: calculate a simple checksum
         let sub_slice_range =
             get_random_subrange(slice, &mut read_start, &dist_offset, &dist_len, srng);
-        let _sum: u8 = slice[sub_slice_range.clone()]
-            .iter()
-            .fold(0, |acc, &x| acc.wrapping_add(x));
-        log::trace!(
-            "Read | {}",
-            msg_page_range(sub_slice_range.start, sub_slice_range.end)
-        );
+        // Touch reads on the pages
+        touch_pages(&mut slice[sub_slice_range.clone()], false);
 
         // Perform a write: Fill with pseudo-random values
         let sub_slice_range =
             get_random_subrange(slice, &mut write_start, &dist_offset, &dist_len, srng);
-        log::debug!(
+        log::trace!(
             "Write | {}",
-            msg_page_range(sub_slice_range.start, sub_slice_range.end)
+            PageNum::range_string_from_addr(sub_slice_range.start, sub_slice_range.end, 0)?
         );
-        srng.fill(&mut slice[sub_slice_range]);
-        if i % 1000000 == 0 {
-            log::debug!("Completed {i} operations...");
-        }
+        // Don't just touch since we want data to be overwritten
+        touch_pages(&mut slice[sub_slice_range], true);
     }
     Ok(())
 }
@@ -124,13 +134,14 @@ fn soft_dirty_benchmark(
     slice: &mut [u8],
     mut run: impl FnMut(&mut [u8]) -> Result<()>,
     verbose: bool,
-) -> Result<Duration> {
+) -> Result<ResultStat> {
     // Pagemap scan to see dirty pages
     // PFNZERO is inverted because newly mapped pages have WRITTEN set even after a read.
     // By inverting PFNZERO, we filter out those pages and only get pages that were actually written to afterwards.
     let mut pm_arg = PmScanArgBuilder::new()
         .addr_range_from_slice(slice)
-        .category_mask(Categories::SOFT_DIRTY | Categories::WRITTEN)
+        .category_mask(Categories::SOFT_DIRTY | Categories::WRITTEN | Categories::PFNZERO)
+        .category_inverted(Categories::PFNZERO)
         .return_mask(
             Categories::WRITTEN
                 | Categories::SOFT_DIRTY
@@ -160,45 +171,24 @@ fn soft_dirty_benchmark(
     };
 
     if verbose {
-        log::info!("Post harness state: {}", scan_res);
+        log::debug!("Post harness state: {}", scan_res);
     }
-    clear_soft_dirty_global()?;
-    log::info!(
+    log::debug!(
         "Reset state (post soft-dirty clear): {}",
         pm_arg.run_pagemap_scan()?
     );
-    Ok(duration)
+    Ok(ResultStat {
+        scan: scan_res,
+        duration,
+    })
 }
 
 /// This method uses the written bit in the PTE with Uffd and PAGEMAP_SCAN
-fn uffd_written_benchmark(
+fn uffd_benchmark(
     slice: &mut [u8],
     mut run: impl FnMut(&mut [u8]) -> Result<()>,
     verbose: bool,
-) -> Result<Duration> {
-    let mut uffd = create_uffd(UffdFlags::UFFD_USER_MODE_ONLY)?;
-    let api = uffd.api(UffdFeature::WP_ASYNC | UffdFeature::WP_UNPOPULATED)?;
-    if !api.ioctls().contains(
-        UffdIoctlsSupported::API | UffdIoctlsSupported::REGISTER | UffdIoctlsSupported::UNREGISTER,
-    ) {
-        return Err(anyhow::anyhow!(
-            "API support incompatible for UFFD: {:?}",
-            api
-        ));
-    }
-
-    let reg = uffd.register(
-        slice.as_mut_ptr() as u64,
-        slice.len() as u64,
-        UffdRegisterMode::MODE_WP,
-    )?;
-    if !reg.contains(UffdIoctlsSupported::WRITEPROTECT) {
-        return Err(anyhow::anyhow!(
-            "Write protect support incompatible for UFFD: {:?}",
-            reg
-        ));
-    }
-
+) -> Result<ResultStat> {
     // Pagemap scan to see dirty pages (similar to `soft_dirty_benchmark`)
     let pm_arg_builder = PmScanArgBuilder::new()
         .addr_range_from_slice(slice)
@@ -227,15 +217,18 @@ fn uffd_written_benchmark(
     };
 
     if verbose {
-        log::info!("Post harness state: {}", scan_res);
+        log::debug!("Post harness state: {}", scan_res);
     }
     // To view the reset state, create a new pm_arg without write protect (just gets the state)
     let mut pm_arg_nowp = pm_arg_builder.clone().flags(Flags::empty()).finish();
-    log::info!(
+    log::debug!(
         "Reset State (post WP clear by scan): {}",
         pm_arg_nowp.run_pagemap_scan()?
     );
-    Ok(duration)
+    Ok(ResultStat {
+        scan: scan_res,
+        duration,
+    })
 }
 
 fn main() -> Result<()> {
@@ -257,25 +250,72 @@ fn main() -> Result<()> {
         ptr
     };
     log::info!("Mapped {} bytes at {:p}", cli.size, ptr);
+    let normal = Normal::new(0.0, cli.stddev.unwrap_or((cli.size >> 15) as f64))?;
+    log::info!("Using {:?} for random walk", normal);
+
     // Create a slice from the raw parts
     let slice = unsafe { std::slice::from_raw_parts_mut(ptr.cast::<u8>().as_ptr(), cli.size) };
     // Initialize with random data using a seeded RNG
     let mut srng = StdRng::seed_from_u64(cli.seed);
 
-    let run_call = |s: &mut [u8]| {
-        run_harness(
-            s,
-            cli.num_ops,
-            Normal::new(0.0, cli.stddev.unwrap_or((cli.size >> 15) as f64))?,
-            &mut srng,
-        )
-    };
-    let duration = match cli.strategy {
-        DirtyTrackingStrategy::SoftDirty => soft_dirty_benchmark(slice, run_call, cli.verbose)?,
-        DirtyTrackingStrategy::UffdWritten => uffd_written_benchmark(slice, run_call, cli.verbose)?,
+    let mut run_call = |s: &mut [u8]| run_harness(s, cli.num_ops, normal, &mut srng);
+    let results = match cli.strategy {
+        DirtyTrackingStrategy::SoftDirty => (0..cli.runs)
+            .enumerate()
+            .map(|(i, _)| {
+                log::info!("Starting Soft-Dirty run {i}...");
+                soft_dirty_benchmark(slice, &mut run_call, cli.verbose)
+            })
+            .collect::<Result<Vec<_>>>()?,
+
+        DirtyTrackingStrategy::Uffd => {
+            // UFFD initializiation setup
+            let mut uffd = create_uffd(UffdFlags::UFFD_USER_MODE_ONLY)?;
+            let api = uffd.api(UffdFeature::WP_ASYNC | UffdFeature::WP_UNPOPULATED)?;
+            if !api.ioctls().contains(
+                UffdIoctlsSupported::API
+                    | UffdIoctlsSupported::REGISTER
+                    | UffdIoctlsSupported::UNREGISTER,
+            ) {
+                return Err(anyhow::anyhow!(
+                    "API support incompatible for UFFD: {:?}",
+                    api
+                ));
+            }
+
+            let reg = uffd.register(
+                slice.as_mut_ptr() as u64,
+                slice.len() as u64,
+                UffdRegisterMode::MODE_WP,
+            )?;
+            if !reg.contains(UffdIoctlsSupported::WRITEPROTECT) {
+                return Err(anyhow::anyhow!(
+                    "Write protect support incompatible for UFFD: {:?}",
+                    reg
+                ));
+            }
+
+            // Perform benchmark runs
+            (0..cli.runs)
+                .enumerate()
+                .map(|(i, _)| {
+                    log::info!("Starting UFFD run {i}...");
+                    uffd_benchmark(slice, &mut run_call, cli.verbose)
+                })
+                .collect::<Result<Vec<_>>>()?
+        }
     };
 
-    log::info!("Scan took {:?}", duration.as_micros());
+    if let Some(output_file) = cli.output {
+        serde_json::to_writer_pretty(BufWriter::new(File::create(output_file)?), &results)?;
+    }
+    log::debug!(
+        "Scans took {:?}",
+        results
+            .into_iter()
+            .map(|ResultStat { duration, .. }| duration.as_micros())
+            .collect::<Vec<_>>()
+    );
     log::info!("Completed, cleaning up...");
     // Clean up
     unsafe {
