@@ -1,11 +1,13 @@
 //! A simple wrapper around the pagemap scanning functionality for snapshotting
 
 use anyhow::Result;
-use core::mem;
 use core::ops::Range;
+use core::{fmt, mem};
 use std::fs::File;
 use std::io::{self, Write};
 use std::os::fd::AsRawFd;
+use std::thread;
+use std::time::Duration;
 
 const PAGEMAP_PATH: &str = "/proc/self/pagemap";
 const CLEARREFS_PATH: &str = "/proc/self/clear_refs";
@@ -14,11 +16,39 @@ pub fn page_size() -> usize {
     unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
 }
 
+pub fn page_num(mut addr: usize, align_down: bool) -> usize {
+    let page_bytes = page_size().ilog2();
+    if align_down {
+        if addr & (page_size() - 1) == 0 {
+            addr -= page_size();
+        }
+    }
+    addr >> page_bytes
+}
+
+#[allow(dead_code)]
 pub fn get_total_memory() -> usize {
     unsafe {
         let pages = libc::sysconf(libc::_SC_PHYS_PAGES);
         (pages as usize) * page_size()
     }
+}
+
+pub fn msg_page_range(relative_start: usize, relative_end: usize) -> String {
+    let start_page = page_num(relative_start, false);
+    let end_page = page_num(relative_end, true);
+    format!(
+        "Pages: {}", // (Addrs: {:#x} -- {:#x})",
+        if start_page > end_page {
+            "NIL".to_string()
+        } else if start_page == end_page {
+            format!("{:#x}", start_page)
+        } else {
+            format!("{:#x} ... {:#x}", start_page, end_page)
+        },
+        //relative_start,
+        //relative_end
+    )
 }
 
 /// Input `struct pm_scan_arg` for pagemap scan ioctl
@@ -105,15 +135,42 @@ pub struct PageRegion {
 
 #[derive(Default, Debug, Clone)]
 pub struct PageMapScanResult {
-    pub regions: Vec<PageRegion>,
-    pub walk_end: u64,
+    start_addr: u64,
+    regions: Vec<PageRegion>,
+    walk_end: u64,
 }
 
-//#[allow(dead_code)]
-//pub fn walk_end(mut self, walk_end: &'a mut u64) -> Self {
+impl fmt::Display for PageMapScanResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "==== PAGEMAP SCAN (Scan ended before Page {:#x}) ====",
+            page_num((self.walk_end - self.start_addr) as usize, false)
+        )?;
+        for region in &self.regions {
+            if region.start == 0 {
+                // End of scan result
+                break;
+            }
+            writeln!(
+                f,
+                "{} | {:?}",
+                msg_page_range(
+                    (region.start - self.start_addr) as usize,
+                    (region.end - self.start_addr) as usize
+                ),
+                region.categories
+            )?;
+        }
+        writeln!(f, "========================================")?;
+        Ok(())
+    }
+}
+
 impl PmScanArg {
     pub fn run_pagemap_scan(&mut self) -> Result<PageMapScanResult> {
-        let mut res = PageMapScanResult::default();
+        let mut pm_res = PageMapScanResult::default();
+        pm_res.start_addr = self.start;
 
         // If max_pages is 0, set output vector size to max of the length
         let vec_cap = if self.max_pages == 0 {
@@ -121,30 +178,33 @@ impl PmScanArg {
         } else {
             self.max_pages as usize
         };
-        res.regions = Vec::with_capacity(vec_cap);
+        // The ioctl returns the length of the output vector, but we need to conservatively allocate
+        pm_res.regions = vec![PageRegion::default(); vec_cap];
 
         // Set the pointers for output
-        self.vec = res.regions.as_mut_ptr() as u64;
-        self.walk_end = &res.walk_end as *const u64 as u64;
+        self.vec = pm_res.regions.as_mut_ptr() as u64;
+        self.vec_len = vec_cap as u64;
 
+        // Generate the ioctl wrapper and run
         let pagemap = File::open(PAGEMAP_PATH)?;
-        // Generate the ioctl wrapper
         nix::ioctl_readwrite!(pm_scan_ioctl_cmd, b'f', 16, PmScanArg);
-
-        println!("Before ioctl: {:?}", self);
         let result = unsafe { pm_scan_ioctl_cmd(pagemap.as_raw_fd(), self as *mut PmScanArg)? };
-        // Update output vector length
-        println!("After ioctl: {:?}", self);
-        unsafe {
-            res.regions.set_len(self.vec_len as usize);
-        }
         if result < 0 {
             return Err(io::Error::last_os_error().into());
         }
-        Ok(res)
+
+        // Update output walk end
+        pm_res.walk_end = self.walk_end;
+        // Number of elements in the vector is the result
+        unsafe {
+            pm_res.regions.set_len(result as usize);
+        }
+
+        Ok(pm_res)
     }
 }
 
+#[derive(Clone)]
 pub struct PmScanArgBuilder(PmScanArg);
 
 impl PmScanArgBuilder {
@@ -153,12 +213,21 @@ impl PmScanArgBuilder {
     }
 
     /// Set the address range to scan. The end address is exclusive for the pagemap_scan
+    #[allow(dead_code)]
     pub fn addr_range(mut self, range: Range<u64>) -> Self {
         self.0.start = range.start;
         self.0.end = range.end;
         self
     }
 
+    pub fn addr_range_from_slice(mut self, slice: &[u8]) -> Self {
+        let start = slice.as_ptr();
+        self.0.start = start as u64;
+        self.0.end = unsafe { start.offset(slice.len() as isize) as u64 };
+        self
+    }
+
+    #[allow(dead_code)]
     pub fn flags(mut self, flags: Flags) -> Self {
         self.0.flags = flags;
         self
@@ -169,6 +238,7 @@ impl PmScanArgBuilder {
     }
 
     /// 0 means no limit
+    #[allow(dead_code)]
     pub fn max_pages(mut self, max_pages: u64) -> Self {
         self.0.max_pages = max_pages;
         self
@@ -180,6 +250,7 @@ impl PmScanArgBuilder {
         self
     }
 
+    #[allow(dead_code)]
     pub fn category_mask(mut self, category_mask: Categories) -> Self {
         self.0.category_mask = category_mask;
         self
@@ -197,26 +268,12 @@ impl PmScanArgBuilder {
     }
 }
 
-pub fn clear_refs() -> Result<()> {
+/// This doesn't clear WRITTEN bit; only SOFT_DIRTY. Need mprotect for that.
+pub fn clear_soft_dirty_global() -> Result<()> {
     let mut file = File::options().write(true).open(CLEARREFS_PATH)?;
     file.write_all(b"4")?;
+    file.flush()?;
+    drop(file);
+    thread::sleep(Duration::from_millis(20));
     Ok(())
-}
-
-pub fn print_pagemap_results(vec: &[PageRegion], start: u64, end: u64, walk_end: u64) {
-    log::info!("========= Pagemap Scan Results ========= ");
-    log::info!(
-        "Scanned range: {:#x} -- {:#x} (end: {:#x})",
-        start,
-        walk_end,
-        end
-    );
-    for region in vec {
-        log::info!(
-            "Region: {:#x} - {:#x}, Categories: {:?}",
-            region.start,
-            region.end,
-            region.categories
-        );
-    }
 }

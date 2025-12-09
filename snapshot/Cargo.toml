@@ -12,3 +12,4 @@ libc = "0.2.177"
 rayon = "1.11.0"
 bitflags = "2.10.0"
 nix = { version = "0.30.1", features = ["ioctl", "mman"] }
+rand_distr = "0.4"
