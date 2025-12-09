@@ -11,6 +11,7 @@ use std::cmp::{max, min};
 use std::fs::File;
 use std::io::BufWriter;
 use std::ops::Range;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 mod pagemap;
@@ -156,8 +157,8 @@ fn soft_dirty_benchmark(
 
     // TBD Weird Bug: Idk what happens with soft dirty here, but if we have a newly mapped
     // soft-dirty pages, it sometimes clears and sometimes it doesn't...
-    // It seems to work consistently if we touch the pages first though..
-    touch_pages(slice, false);
+    // It seems to work more consistently if we touch the pages first though..
+    //touch_pages(slice, false);
     clear_soft_dirty_global()?;
 
     // Run and time the dirty page tracking loop
@@ -236,6 +237,10 @@ fn main() -> Result<()> {
     log::debug!("Page size: {} bytes", page_size());
 
     let cli = CLI::parse();
+
+    // Open the pagemap and clear_refs files
+    LazyLock::force(&PAGEMAP_FILE);
+    LazyLock::force(&CLEAR_REFS_FILE);
 
     // mmap the memory
     let ptr = unsafe {

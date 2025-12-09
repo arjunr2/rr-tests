@@ -3,13 +3,26 @@
 use anyhow::{Result, ensure};
 use core::ops::Range;
 use core::{fmt, mem};
-use procfs::process::{ClearRefs, Process};
 use serde::Serialize;
 use std::fs::File;
-use std::io;
+use std::io::{self, Write};
 use std::os::fd::AsRawFd;
+use std::sync::LazyLock;
 use std::thread;
 use std::time::Duration;
+
+const PAGEMAP_PATH: &str = "/proc/self/pagemap";
+const CLEARREFS_PATH: &str = "/proc/self/clear_refs";
+
+pub static CLEAR_REFS_FILE: LazyLock<File> = LazyLock::new(|| {
+    File::options()
+        .write(true)
+        .open(CLEARREFS_PATH)
+        .expect("Failed to open clear_refs")
+});
+
+pub static PAGEMAP_FILE: LazyLock<File> =
+    LazyLock::new(|| File::open(PAGEMAP_PATH).expect("Failed to open pagemap"));
 
 pub fn page_size() -> usize {
     unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
@@ -213,7 +226,7 @@ impl fmt::Display for PageMapScanResult {
         writeln!(
             f,
             "==== PAGEMAP SCAN (Scan ended before Page {:#x}) ====",
-            self.walk_start.0
+            self.walk_end.0
         )?;
         for region in &self.regions {
             writeln!(
@@ -247,7 +260,7 @@ impl PmScanArg {
         self.vec_len = vec_cap as u64;
 
         // Generate the ioctl wrapper and run
-        let pagemap = File::open("/proc/self/pagemap")?;
+        let pagemap = &*PAGEMAP_FILE;
         nix::ioctl_readwrite!(pm_scan_ioctl_cmd, b'f', 16, PmScanArg);
         let result = unsafe { pm_scan_ioctl_cmd(pagemap.as_raw_fd(), self as *mut PmScanArg)? };
         if result < 0 {
@@ -332,9 +345,9 @@ impl PmScanArgBuilder {
 /// This doesn't clear WRITTEN bit; only SOFT_DIRTY. Need mprotect for that.
 pub fn clear_soft_dirty_global() -> Result<()> {
     log::trace!("Clearing soft-dirty bits globally...");
-    println!("ID: {}", Process::myself()?.pid);
-    Process::myself()?.clear_refs(ClearRefs::SoftDirty)?;
-    // Sleep a bit to ensure the clear takes effect before we proceed
-    thread::sleep(Duration::from_secs(10));
+    let mut file = &*CLEAR_REFS_FILE;
+    file.write_all(b"4")?;
+    file.flush()?;
+    thread::sleep(Duration::from_micros(200));
     Ok(())
 }
