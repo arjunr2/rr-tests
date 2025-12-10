@@ -8,8 +8,6 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::sync::LazyLock;
-use std::thread;
-use std::time::Duration;
 
 use crate::SoftDirtyBitmap;
 
@@ -181,7 +179,7 @@ pub struct PageRegionRaw {
 //    walk_end: u64,
 //}
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PageRegion {
     pub start: PageNum,
     pub end: PageNum,
@@ -199,7 +197,7 @@ impl PageRegion {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PageMapScanResult {
     walk_start: PageNum,
     walk_end: PageNum,
@@ -406,7 +404,7 @@ impl PmScanArgBuilder {
 pub fn clear_soft_dirty_global() -> Result<()> {
     log::trace!("Clearing soft-dirty bits globally...");
     let mut file = &*CLEAR_REFS_FILE;
-    file.write_all(b"4\n")?;
-    thread::sleep(Duration::from_micros(200));
+    file.write_all(b"4")?;
+    file.flush()?;
     Ok(())
 }

@@ -20,6 +20,9 @@ use pagemap::*;
 mod uffd;
 use uffd::*;
 
+mod jit;
+use jit::{JitCompiler, JittedFn};
+
 const MB: usize = 1024 * 1024;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Serialize)]
@@ -42,9 +45,14 @@ struct CLI {
     pub stddev: Option<f64>,
     #[arg(short, long, default_value_t = false)]
     pub verbose: bool,
-    // Number of times to run the benchmark
+    /// Number of times to run the benchmark
     #[arg(short, long, default_value_t = 1)]
     pub runs: u32,
+    /// Warmup runs
+    ///
+    /// These do not show up in the final stats
+    #[arg(short, long, default_value_t = 3)]
+    pub warmup_runs: u32,
     /// Output file to write timing results to
     #[arg(short, long)]
     pub output: Option<String>,
@@ -54,7 +62,7 @@ struct CLI {
 
 struct SoftDirtyBitmap(pub Vec<u8>);
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct ResultStat {
     pub scan: PageMapScanResult,
     pub scan_duration: Duration,
@@ -112,7 +120,6 @@ fn run_harness(
     let dist_len = Normal::new(1.5, 1.0)?;
     let mut read_start: usize = slice.len() / 2;
     let mut write_start: usize = slice.len() / 2;
-    let base_ptr = slice.as_mut_ptr();
 
     let read_write_ranges = (0..num_ops)
         .map(|_| {
@@ -123,34 +130,12 @@ fn run_harness(
         })
         .collect::<Vec<_>>();
 
-    let start_time = Instant::now();
-    for (read, write) in read_write_ranges {
-        unsafe {
-            match read.len() {
-                1 => {
-                    std::hint::black_box(base_ptr.add(read.start).read());
-                }
-                2 => {
-                    std::hint::black_box(base_ptr.add(read.start).cast::<u16>().read_unaligned());
-                }
-                4 => {
-                    std::hint::black_box(base_ptr.add(read.start).cast::<u32>().read_unaligned());
-                }
-                8 => {
-                    std::hint::black_box(base_ptr.add(read.start).cast::<u64>().read_unaligned());
-                }
-                _ => unreachable!(),
-            }
+    let compiler = JitCompiler::new();
+    let code = compiler.compile(&read_write_ranges, None, page_size());
+    let jit_fn = JittedFn::new(&code)?;
 
-            match write.len() {
-                1 => base_ptr.add(write.start).write(1),
-                2 => base_ptr.add(write.start).cast::<u16>().write_unaligned(1),
-                4 => base_ptr.add(write.start).cast::<u32>().write_unaligned(1),
-                8 => base_ptr.add(write.start).cast::<u64>().write_unaligned(1),
-                _ => unreachable!(),
-            }
-        }
-    }
+    let start_time = Instant::now();
+    jit_fn.run(slice.as_mut_ptr(), std::ptr::null_mut());
     Ok(start_time.elapsed())
 }
 
@@ -164,8 +149,6 @@ fn run_harness_emulated_dirty(
     let dist_len = Normal::new(1.5, 1.0)?;
     let mut read_start: usize = slice.len() / 2;
     let mut write_start: usize = slice.len() / 2;
-    let base_ptr = slice.as_mut_ptr();
-    let ps_bits = page_size_bits();
     let mut bitmap_store =
         SoftDirtyBitmap(vec![0u8; (slice.len() + page_size() - 1) / page_size()]);
     let bitmap = &mut bitmap_store.0[..];
@@ -179,63 +162,18 @@ fn run_harness_emulated_dirty(
         })
         .collect::<Vec<_>>();
 
-    let start_time = Instant::now();
-    for (read, write) in read_write_ranges {
-        unsafe {
-            match read.len() {
-                1 => {
-                    std::hint::black_box(base_ptr.add(read.start).read());
-                }
-                2 => {
-                    std::hint::black_box(base_ptr.add(read.start).cast::<u16>().read_unaligned());
-                }
-                4 => {
-                    std::hint::black_box(base_ptr.add(read.start).cast::<u32>().read_unaligned());
-                }
-                8 => {
-                    std::hint::black_box(base_ptr.add(read.start).cast::<u64>().read_unaligned());
-                }
-                _ => unreachable!(),
-            }
+    let compiler = JitCompiler::new();
+    let code = compiler.compile(
+        &read_write_ranges,
+        Some(bitmap.as_mut_ptr() as usize),
+        page_size(),
+    );
+    let jit_fn = JittedFn::new(&code)?;
 
-            match write.len() {
-                1 => {
-                    base_ptr.add(write.start).write(1);
-                    let start_page = write.start >> ps_bits;
-                    *bitmap.get_unchecked_mut(start_page) = 1;
-                }
-                2 => {
-                    base_ptr.add(write.start).cast::<u16>().write_unaligned(1);
-                    let start_page = write.start >> ps_bits;
-                    let end_page = (write.start + 1) >> ps_bits;
-                    *bitmap.get_unchecked_mut(start_page) = 1;
-                    if start_page != end_page {
-                        *bitmap.get_unchecked_mut(end_page) = 1;
-                    }
-                }
-                4 => {
-                    base_ptr.add(write.start).cast::<u32>().write_unaligned(1);
-                    let start_page = write.start >> ps_bits;
-                    let end_page = (write.start + 3) >> ps_bits;
-                    *bitmap.get_unchecked_mut(start_page) = 1;
-                    if start_page != end_page {
-                        *bitmap.get_unchecked_mut(end_page) = 1;
-                    }
-                }
-                8 => {
-                    base_ptr.add(write.start).cast::<u64>().write_unaligned(1);
-                    let start_page = write.start >> ps_bits;
-                    let end_page = (write.start + 7) >> ps_bits;
-                    *bitmap.get_unchecked_mut(start_page) = 1;
-                    if start_page != end_page {
-                        *bitmap.get_unchecked_mut(end_page) = 1;
-                    }
-                }
-                _ => unreachable!(),
-            }
-        }
-    }
-    Ok((start_time.elapsed(), bitmap_store))
+    let start_time = Instant::now();
+    jit_fn.run(slice.as_mut_ptr(), bitmap.as_mut_ptr());
+    let duration = start_time.elapsed();
+    Ok((duration, bitmap_store))
 }
 
 /// This method uses the soft-dirty tracking mechanism to perform dirty page tracking
@@ -444,7 +382,7 @@ fn main() -> Result<()> {
 
         let output = BenchmarkOutput {
             strategy: cli.strategy,
-            results,
+            results: results[cli.warmup_runs as usize..].to_vec(),
         };
         serde_json::to_writer_pretty(BufWriter::new(File::create(output_file)?), &output)?;
     }
