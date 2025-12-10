@@ -7,7 +7,7 @@ use rand::prelude::*;
 use rand::{Rng, rngs::StdRng};
 use rand_distr::{Distribution, Normal};
 use serde::Serialize;
-use std::cmp::{max, min};
+use std::cmp::min;
 use std::fs::File;
 use std::io::BufWriter;
 use std::ops::Range;
@@ -22,10 +22,11 @@ use uffd::*;
 
 const MB: usize = 1024 * 1024;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Serialize)]
 enum DirtyTrackingStrategy {
     SoftDirty,
     Uffd,
+    EmulatedSoftDirty,
 }
 
 #[derive(Parser)]
@@ -36,9 +37,6 @@ struct CLI {
     pub num_ops: u32,
     #[arg(short = 'x', long = "seed", default_value_t = 42)]
     pub seed: u64,
-    /// The percentage of total system memory to hog for interference
-    #[arg(short, long, default_value_t = false)]
-    pub memory_interference: bool,
     /// The stddev of the normal distribution sampled from for random walk
     #[arg(short = 'd', long = "stddev")]
     pub stddev: Option<f64>,
@@ -54,10 +52,13 @@ struct CLI {
     pub strategy: DirtyTrackingStrategy,
 }
 
+struct SoftDirtyBitmap(pub Vec<u8>);
+
 #[derive(Serialize)]
 struct ResultStat {
     pub scan: PageMapScanResult,
-    pub duration: Duration,
+    pub scan_duration: Duration,
+    pub harness_duration: Duration,
 }
 
 fn page_iter(bytes: &mut [u8]) -> impl Iterator<Item = &mut [u8]> {
@@ -91,9 +92,10 @@ fn get_random_subrange<R: Rng + ?Sized>(
     let range_start = ((*start as isize + offset) % (size as isize)) as usize;
     // Determine max possible length to stay within bounds
     let max_len = src.len() - range_start;
-    // Choose a length ensuring we don't exceed the buffer end.
-    let slen = dist_len.sample(rng).round() as isize;
-    let access_len = min(max_len as isize, max(0 as isize, slen)) as usize;
+    // Choose a length ensuring we don't exceed the buffer end, and it's
+    let slen = dist_len.sample(rng).round().min(3.0).max(0.0) as isize;
+    // Access len is now [1, 2, 4, 8] bytes
+    let access_len = 1 << min(max_len as isize, slen) as usize;
     let ret_range = range_start..range_start + access_len;
     // Set the new start for random walk
     *start = range_start;
@@ -105,35 +107,141 @@ fn run_harness(
     num_ops: u32,
     dist_offset: Normal<f64>,
     srng: &mut StdRng,
-) -> Result<()> {
+) -> Result<Duration> {
     // This is the log2 of the length
-    let dist_len = Normal::new(2.0, 1.0)?;
+    let dist_len = Normal::new(1.5, 1.0)?;
     let mut read_start: usize = slice.len() / 2;
     let mut write_start: usize = slice.len() / 2;
-    for _ in 0..num_ops {
-        // Perform a read: calculate a simple checksum
-        let sub_slice_range =
-            get_random_subrange(slice, &mut read_start, &dist_offset, &dist_len, srng);
-        // Touch reads on the pages
-        touch_pages(&mut slice[sub_slice_range.clone()], false);
+    let base_ptr = slice.as_mut_ptr();
 
-        // Perform a write: Fill with pseudo-random values
-        let sub_slice_range =
-            get_random_subrange(slice, &mut write_start, &dist_offset, &dist_len, srng);
-        log::trace!(
-            "Write | {}",
-            PageNum::range_string_from_addr(sub_slice_range.start, sub_slice_range.end, 0)?
-        );
-        // Don't just touch since we want data to be overwritten
-        touch_pages(&mut slice[sub_slice_range], true);
+    let read_write_ranges = (0..num_ops)
+        .map(|_| {
+            (
+                get_random_subrange(slice, &mut read_start, &dist_offset, &dist_len, srng),
+                get_random_subrange(slice, &mut write_start, &dist_offset, &dist_len, srng),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let start_time = Instant::now();
+    for (read, write) in read_write_ranges {
+        unsafe {
+            match read.len() {
+                1 => {
+                    std::hint::black_box(base_ptr.add(read.start).read());
+                }
+                2 => {
+                    std::hint::black_box(base_ptr.add(read.start).cast::<u16>().read_unaligned());
+                }
+                4 => {
+                    std::hint::black_box(base_ptr.add(read.start).cast::<u32>().read_unaligned());
+                }
+                8 => {
+                    std::hint::black_box(base_ptr.add(read.start).cast::<u64>().read_unaligned());
+                }
+                _ => unreachable!(),
+            }
+
+            match write.len() {
+                1 => base_ptr.add(write.start).write(1),
+                2 => base_ptr.add(write.start).cast::<u16>().write_unaligned(1),
+                4 => base_ptr.add(write.start).cast::<u32>().write_unaligned(1),
+                8 => base_ptr.add(write.start).cast::<u64>().write_unaligned(1),
+                _ => unreachable!(),
+            }
+        }
     }
-    Ok(())
+    Ok(start_time.elapsed())
+}
+
+fn run_harness_emulated_dirty(
+    slice: &mut [u8],
+    num_ops: u32,
+    dist_offset: Normal<f64>,
+    srng: &mut StdRng,
+) -> Result<(Duration, SoftDirtyBitmap)> {
+    // This is the log2 of the length
+    let dist_len = Normal::new(1.5, 1.0)?;
+    let mut read_start: usize = slice.len() / 2;
+    let mut write_start: usize = slice.len() / 2;
+    let base_ptr = slice.as_mut_ptr();
+    let ps_bits = page_size_bits();
+    let mut bitmap_store =
+        SoftDirtyBitmap(vec![0u8; (slice.len() + page_size() - 1) / page_size()]);
+    let bitmap = &mut bitmap_store.0[..];
+
+    let read_write_ranges = (0..num_ops)
+        .map(|_| {
+            (
+                get_random_subrange(slice, &mut read_start, &dist_offset, &dist_len, srng),
+                get_random_subrange(slice, &mut write_start, &dist_offset, &dist_len, srng),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let start_time = Instant::now();
+    for (read, write) in read_write_ranges {
+        unsafe {
+            match read.len() {
+                1 => {
+                    std::hint::black_box(base_ptr.add(read.start).read());
+                }
+                2 => {
+                    std::hint::black_box(base_ptr.add(read.start).cast::<u16>().read_unaligned());
+                }
+                4 => {
+                    std::hint::black_box(base_ptr.add(read.start).cast::<u32>().read_unaligned());
+                }
+                8 => {
+                    std::hint::black_box(base_ptr.add(read.start).cast::<u64>().read_unaligned());
+                }
+                _ => unreachable!(),
+            }
+
+            match write.len() {
+                1 => {
+                    base_ptr.add(write.start).write(1);
+                    let start_page = write.start >> ps_bits;
+                    *bitmap.get_unchecked_mut(start_page) = 1;
+                }
+                2 => {
+                    base_ptr.add(write.start).cast::<u16>().write_unaligned(1);
+                    let start_page = write.start >> ps_bits;
+                    let end_page = (write.start + 1) >> ps_bits;
+                    *bitmap.get_unchecked_mut(start_page) = 1;
+                    if start_page != end_page {
+                        *bitmap.get_unchecked_mut(end_page) = 1;
+                    }
+                }
+                4 => {
+                    base_ptr.add(write.start).cast::<u32>().write_unaligned(1);
+                    let start_page = write.start >> ps_bits;
+                    let end_page = (write.start + 3) >> ps_bits;
+                    *bitmap.get_unchecked_mut(start_page) = 1;
+                    if start_page != end_page {
+                        *bitmap.get_unchecked_mut(end_page) = 1;
+                    }
+                }
+                8 => {
+                    base_ptr.add(write.start).cast::<u64>().write_unaligned(1);
+                    let start_page = write.start >> ps_bits;
+                    let end_page = (write.start + 7) >> ps_bits;
+                    *bitmap.get_unchecked_mut(start_page) = 1;
+                    if start_page != end_page {
+                        *bitmap.get_unchecked_mut(end_page) = 1;
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+    Ok((start_time.elapsed(), bitmap_store))
 }
 
 /// This method uses the soft-dirty tracking mechanism to perform dirty page tracking
 fn soft_dirty_benchmark(
     slice: &mut [u8],
-    mut run: impl FnMut(&mut [u8]) -> Result<()>,
+    mut run: impl FnMut(&mut [u8]) -> Result<Duration>,
     verbose: bool,
 ) -> Result<ResultStat> {
     // Pagemap scan to see dirty pages
@@ -158,15 +266,15 @@ fn soft_dirty_benchmark(
     // TBD Weird Bug: Idk what happens with soft dirty here, but if we have a newly mapped
     // soft-dirty pages, it sometimes clears and sometimes it doesn't...
     // It seems to work more consistently if we touch the pages first though..
-    //touch_pages(slice, false);
+    touch_pages(slice, false);
     clear_soft_dirty_global()?;
 
     // Run and time the dirty page tracking loop
-    run(slice)?;
+    let harness_duration = run(slice)?;
 
     let (scan_res, duration) = {
         let start_time = Instant::now();
-        let res = pm_arg.run_pagemap_scan()?;
+        let res = pm_arg.run_pagemap_scan_till_end()?;
         clear_soft_dirty_global()?;
         (res, start_time.elapsed())
     };
@@ -176,18 +284,19 @@ fn soft_dirty_benchmark(
     }
     log::debug!(
         "Reset state (post soft-dirty clear): {}",
-        pm_arg.run_pagemap_scan()?
+        pm_arg.run_pagemap_scan_till_end()?
     );
     Ok(ResultStat {
         scan: scan_res,
-        duration,
+        scan_duration: duration,
+        harness_duration,
     })
 }
 
 /// This method uses the written bit in the PTE with Uffd and PAGEMAP_SCAN
 fn uffd_benchmark(
     slice: &mut [u8],
-    mut run: impl FnMut(&mut [u8]) -> Result<()>,
+    mut run: impl FnMut(&mut [u8]) -> Result<Duration>,
     verbose: bool,
 ) -> Result<ResultStat> {
     // Pagemap scan to see dirty pages (similar to `soft_dirty_benchmark`)
@@ -209,11 +318,11 @@ fn uffd_benchmark(
     let mut pm_arg = pm_arg_builder.clone().finish();
 
     // Run and time the dirty page tracking loop
-    run(slice)?;
+    let harness_duration = run(slice)?;
 
     let (scan_res, duration) = {
         let start_time = Instant::now();
-        let res = pm_arg.run_pagemap_scan()?;
+        let res = pm_arg.run_pagemap_scan_till_end()?;
         (res, start_time.elapsed())
     };
 
@@ -224,11 +333,12 @@ fn uffd_benchmark(
     let mut pm_arg_nowp = pm_arg_builder.clone().flags(Flags::empty()).finish();
     log::debug!(
         "Reset State (post WP clear by scan): {}",
-        pm_arg_nowp.run_pagemap_scan()?
+        pm_arg_nowp.run_pagemap_scan_till_end()?
     );
     Ok(ResultStat {
         scan: scan_res,
-        duration,
+        scan_duration: duration,
+        harness_duration,
     })
 }
 
@@ -265,6 +375,20 @@ fn main() -> Result<()> {
 
     let mut run_call = |s: &mut [u8]| run_harness(s, cli.num_ops, normal, &mut srng);
     let results = match cli.strategy {
+        DirtyTrackingStrategy::EmulatedSoftDirty => (0..cli.runs)
+            .enumerate()
+            .map(|(i, _)| {
+                log::info!("Starting Emulated Soft-Dirty run {i}...");
+                let (harness_duration, bitmap) =
+                    run_harness_emulated_dirty(slice, cli.num_ops, normal, &mut srng)?;
+                Ok(ResultStat {
+                    scan: PageMapScanResult::from_bitmap(bitmap, Categories::empty()),
+                    scan_duration: Duration::ZERO,
+                    harness_duration,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?,
+
         DirtyTrackingStrategy::SoftDirty => (0..cli.runs)
             .enumerate()
             .map(|(i, _)| {
@@ -312,15 +436,18 @@ fn main() -> Result<()> {
     };
 
     if let Some(output_file) = cli.output {
-        serde_json::to_writer_pretty(BufWriter::new(File::create(output_file)?), &results)?;
+        #[derive(Serialize)]
+        struct BenchmarkOutput {
+            strategy: DirtyTrackingStrategy,
+            results: Vec<ResultStat>,
+        }
+
+        let output = BenchmarkOutput {
+            strategy: cli.strategy,
+            results,
+        };
+        serde_json::to_writer_pretty(BufWriter::new(File::create(output_file)?), &output)?;
     }
-    log::debug!(
-        "Scans took {:?}",
-        results
-            .into_iter()
-            .map(|ResultStat { duration, .. }| duration.as_micros())
-            .collect::<Vec<_>>()
-    );
     log::info!("Completed, cleaning up...");
     // Clean up
     unsafe {

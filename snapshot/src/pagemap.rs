@@ -11,6 +11,8 @@ use std::sync::LazyLock;
 use std::thread;
 use std::time::Duration;
 
+use crate::SoftDirtyBitmap;
+
 const PAGEMAP_PATH: &str = "/proc/self/pagemap";
 const CLEARREFS_PATH: &str = "/proc/self/clear_refs";
 
@@ -28,6 +30,10 @@ pub fn page_size() -> usize {
     unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
 }
 
+pub fn page_size_bits() -> u32 {
+    page_size().ilog2()
+}
+
 #[allow(dead_code)]
 pub fn get_total_memory() -> usize {
     unsafe {
@@ -41,12 +47,7 @@ pub struct PageNum(usize);
 
 impl PageNum {
     pub fn from_addr(addr: usize) -> Self {
-        let page_bytes = page_size().ilog2();
-        //if align_down {
-        //    if addr & (page_size() - 1) == 0 {
-        //        addr -= page_size();
-        //    }
-        //}
+        let page_bytes = page_size_bits();
         Self(addr >> page_bytes)
     }
 
@@ -173,12 +174,12 @@ pub struct PageRegionRaw {
     pub categories: Categories,
 }
 
-#[derive(Default, Debug, Clone)]
-struct PageMapScanResultRaw {
-    start_addr: u64,
-    regions: Vec<PageRegionRaw>,
-    walk_end: u64,
-}
+//#[derive(Default, Debug, Clone)]
+//struct PageMapScanResultRaw {
+//    start_addr: u64,
+//    regions: Vec<PageRegionRaw>,
+//    walk_end: u64,
+//}
 
 #[derive(Debug, Serialize)]
 pub struct PageRegion {
@@ -206,18 +207,55 @@ pub struct PageMapScanResult {
 }
 
 impl PageMapScanResult {
-    fn from_raw(raw: PageMapScanResultRaw, relative_start: usize) -> Result<Self> {
-        let walk_start = PageNum::from_addr_relative(raw.start_addr as usize, relative_start)?;
-        let walk_end = PageNum::from_addr_relative(raw.walk_end as usize, relative_start)?;
-        Ok(Self {
-            walk_start,
-            walk_end,
-            regions: raw
-                .regions
-                .into_iter()
-                .map(|r| PageRegion::from_raw(r, relative_start))
-                .collect::<Result<Vec<PageRegion>>>()?,
-        })
+    //fn from_raw(raw: PageMapScanResultRaw, relative_start: usize) -> Result<Self> {
+    //    let walk_start = PageNum::from_addr_relative(raw.start_addr as usize, relative_start)?;
+    //    let walk_end = PageNum::from_addr_relative(raw.walk_end as usize, relative_start)?;
+    //    Ok(Self {
+    //        walk_start,
+    //        walk_end,
+    //        regions: raw
+    //            .regions
+    //            .into_iter()
+    //            .map(|r| PageRegion::from_raw(r, relative_start))
+    //            .collect::<Result<Vec<PageRegion>>>()?,
+    //    })
+    //}
+
+    pub fn from_bitmap(bitmap: SoftDirtyBitmap, categories: Categories) -> Self {
+        let bitmap = bitmap.0;
+        let mut regions = Vec::new();
+        let mut current_start: Option<usize> = None;
+
+        for (i, &byte) in bitmap.iter().enumerate() {
+            if byte != 0 {
+                if current_start.is_none() {
+                    current_start = Some(i);
+                }
+            } else {
+                if let Some(start) = current_start {
+                    regions.push(PageRegion {
+                        start: PageNum(start),
+                        end: PageNum(i),
+                        categories,
+                    });
+                    current_start = None;
+                }
+            }
+        }
+
+        if let Some(start) = current_start {
+            regions.push(PageRegion {
+                start: PageNum(start),
+                end: PageNum(bitmap.len()),
+                categories,
+            });
+        }
+
+        Self {
+            walk_start: PageNum(0),
+            walk_end: PageNum(bitmap.len()),
+            regions,
+        }
     }
 }
 
@@ -242,39 +280,61 @@ impl fmt::Display for PageMapScanResult {
 }
 
 impl PmScanArg {
-    pub fn run_pagemap_scan(&mut self) -> Result<PageMapScanResult> {
-        let mut pm_res = PageMapScanResultRaw::default();
-        pm_res.start_addr = self.start;
+    pub fn run_pagemap_scan_till_end(&mut self) -> Result<PageMapScanResult> {
+        let initial_start = self.start;
+        let target_end = self.end;
+        let mut all_regions = Vec::new();
 
-        // If max_pages is 0, set output vector size to max of the length
-        let vec_cap = if self.max_pages == 0 {
-            ((self.end - self.start) as usize / page_size()) + 1
-        } else {
-            self.max_pages as usize
-        };
-        // The ioctl returns the length of the output vector, but we need to conservatively allocate
-        pm_res.regions = vec![PageRegionRaw::default(); vec_cap];
-
-        // Set the pointers for output
-        self.vec = pm_res.regions.as_mut_ptr() as u64;
-        self.vec_len = vec_cap as u64;
-
-        // Generate the ioctl wrapper and run
-        let pagemap = &*PAGEMAP_FILE;
+        // Generate the ioctl wrapper
         nix::ioctl_readwrite!(pm_scan_ioctl_cmd, b'f', 16, PmScanArg);
-        let result = unsafe { pm_scan_ioctl_cmd(pagemap.as_raw_fd(), self as *mut PmScanArg)? };
-        if result < 0 {
-            return Err(io::Error::last_os_error().into());
-        }
+        let pagemap = &*PAGEMAP_FILE;
 
-        // Update output walk end
-        pm_res.walk_end = self.walk_end;
-        // Number of elements in the vector is the result
-        unsafe {
-            pm_res.regions.set_len(result as usize);
-        }
+        let last_walk_end = loop {
+            // If max_pages is 0, set output vector size to max of the length
+            let vec_cap = if self.max_pages == 0 {
+                ((target_end - self.start) as usize / page_size()) + 1
+            } else {
+                self.max_pages as usize
+            };
+            // The ioctl returns the length of the output vector, but we need to conservatively allocate
+            let mut regions = vec![PageRegionRaw::default(); vec_cap];
 
-        Ok(PageMapScanResult::from_raw(pm_res, self.start as usize)?)
+            // Set the pointers for output
+            self.vec = regions.as_ptr() as u64;
+            self.vec_len = vec_cap as u64;
+
+            let result = unsafe { pm_scan_ioctl_cmd(pagemap.as_raw_fd(), self as *mut PmScanArg)? };
+            if result < 0 {
+                return Err(io::Error::last_os_error().into());
+            }
+
+            // Number of elements in the vector is the result
+            unsafe {
+                regions.set_len(result as usize);
+            }
+
+            for raw_region in regions {
+                all_regions.push(PageRegion::from_raw(raw_region, initial_start as usize)?);
+            }
+
+            // Update output walk end, and break out if done
+            if self.walk_end >= target_end || self.walk_end <= self.start {
+                break self.walk_end;
+            }
+            self.start = self.walk_end;
+        };
+
+        self.start = initial_start;
+
+        let walk_start =
+            PageNum::from_addr_relative(initial_start as usize, initial_start as usize)?;
+        let walk_end = PageNum::from_addr_relative(last_walk_end as usize, initial_start as usize)?;
+
+        Ok(PageMapScanResult {
+            walk_start,
+            walk_end,
+            regions: all_regions,
+        })
     }
 }
 
@@ -346,8 +406,7 @@ impl PmScanArgBuilder {
 pub fn clear_soft_dirty_global() -> Result<()> {
     log::trace!("Clearing soft-dirty bits globally...");
     let mut file = &*CLEAR_REFS_FILE;
-    file.write_all(b"4")?;
-    file.flush()?;
+    file.write_all(b"4\n")?;
     thread::sleep(Duration::from_micros(200));
     Ok(())
 }
