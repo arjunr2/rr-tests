@@ -45,47 +45,54 @@ def main():
 
     print(f"Number of runs to compare: {num_runs}")
 
-    # Validate scans match across all files for each run
-    # We compare everything against the first file's results
-    for i in range(num_runs):
-        base_scan = first_file["results"][i]["scan"]
-        for data in data_files[1:]:
-            current_scan = data["results"][i]["scan"]
-            if base_scan != current_scan:
-                print(f"Error: Scan mismatch at run index {i} between {first_file['strategy']} and {data['strategy']}", file=sys.stderr)
-                
-                if base_scan.get("walk_start") != current_scan.get("walk_start"):
-                     print(f"  walk_start mismatch: {base_scan.get('walk_start')} vs {current_scan.get('walk_start')}", file=sys.stderr)
-                if base_scan.get("walk_end") != current_scan.get("walk_end"):
-                     print(f"  walk_end mismatch: {base_scan.get('walk_end')} vs {current_scan.get('walk_end')}", file=sys.stderr)
+    # Organize data by strategy
+    strategies = {}
+    for data in data_files:
+        strategies[data["strategy"]] = data["results"]
 
-                base_regions = base_scan.get("regions", [])
-                curr_regions = current_scan.get("regions", [])
-                
-                if len(base_regions) != len(curr_regions):
-                    print(f"  Region count mismatch: {len(base_regions)} vs {len(curr_regions)}", file=sys.stderr)
-                
-                limit = min(len(base_regions), len(curr_regions))
-                for r_idx in range(limit):
-                    br = base_regions[r_idx]
-                    cr = curr_regions[r_idx]
-                    if br != cr:
-                        print(f"  Mismatch at region index {r_idx}:", file=sys.stderr)
-                        print(f"    {first_file['strategy']}: {json.dumps(br)}", file=sys.stderr)
-                        print(f"    {data['strategy']}: {json.dumps(cr)}", file=sys.stderr)
-                        break
-                else:
-                    # If loop completed without break, and lengths differ
-                    if len(base_regions) > limit:
-                         print(f"  Mismatch at region index {limit} (extra in base):", file=sys.stderr)
-                         print(f"    {first_file['strategy']}: {json.dumps(base_regions[limit])}", file=sys.stderr)
-                    elif len(curr_regions) > limit:
-                         print(f"  Mismatch at region index {limit} (extra in current):", file=sys.stderr)
-                         print(f"    {data['strategy']}: {json.dumps(curr_regions[limit])}", file=sys.stderr)
-                
+    def extract_page_num(val):
+        if isinstance(val, list):
+            return val[0]
+        return val
+
+    def get_dirty_pages(scan_result):
+        pages = set()
+        for region in scan_result.get("regions", []):
+            start = extract_page_num(region["start"])
+            end = extract_page_num(region["end"])
+            for p in range(start, end):
+                pages.add(p)
+        return pages
+
+    # Validate scans
+    for i in range(num_runs):
+        uffd_res = strategies.get("Uffd", [None] * num_runs)[i]
+        emulated_res = strategies.get("EmulatedSoftDirty", [None] * num_runs)[i]
+        soft_dirty_res = strategies.get("SoftDirty", [None] * num_runs)[i]
+
+        # 1. Uffd and EmulatedSoftDirty must be identical
+        if uffd_res and emulated_res:
+            if uffd_res["scan"] != emulated_res["scan"]:
+                print(f"Error: Scan mismatch at run index {i} between Uffd and EmulatedSoftDirty", file=sys.stderr)
+                # Detailed diff could go here, but for now just fail
+                # Reuse the logic from before if needed, or just print json
+                print(f"  Uffd: {json.dumps(uffd_res['scan'])}", file=sys.stderr)
+                print(f"  Emulated: {json.dumps(emulated_res['scan'])}", file=sys.stderr)
                 sys.exit(1)
 
-    print("Validation Successful: All scan fields match across all files.")
+        # 2. SoftDirty must be a superset of Uffd/Emulated
+        reference_res = uffd_res or emulated_res
+        if soft_dirty_res and reference_res:
+            sd_pages = get_dirty_pages(soft_dirty_res["scan"])
+            ref_pages = get_dirty_pages(reference_res["scan"])
+            
+            if not sd_pages.issuperset(ref_pages):
+                missing = ref_pages - sd_pages
+                print(f"Error: SoftDirty is NOT a superset of {uffd_res and 'Uffd' or 'EmulatedSoftDirty'} at run index {i}", file=sys.stderr)
+                print(f"  Missing pages in SoftDirty: {sorted(list(missing))}", file=sys.stderr)
+                sys.exit(1)
+
+    print("Validation Successful.")
     print("-" * 90)
     print(f"{'Strategy':<30} | {'Avg Scan (µs)':<20} | {'Avg Harness (µs)':<20}")
     print("-" * 90)

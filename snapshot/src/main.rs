@@ -220,9 +220,11 @@ fn soft_dirty_benchmark(
     if verbose {
         log::debug!("Post harness state: {}", scan_res);
     }
-    log::debug!(
-        "Reset state (post soft-dirty clear): {}",
-        pm_arg.run_pagemap_scan_till_end()?
+    let reset_state = pm_arg.run_pagemap_scan_till_end()?;
+    assert!(
+        reset_state.is_regions_empty(),
+        "Expected empty reset state after soft-dirty clear: {}",
+        reset_state
     );
     Ok(ResultStat {
         scan: scan_res,
@@ -269,9 +271,11 @@ fn uffd_benchmark(
     }
     // To view the reset state, create a new pm_arg without write protect (just gets the state)
     let mut pm_arg_nowp = pm_arg_builder.clone().flags(Flags::empty()).finish();
-    log::debug!(
-        "Reset State (post WP clear by scan): {}",
-        pm_arg_nowp.run_pagemap_scan_till_end()?
+    let reset_state = pm_arg_nowp.run_pagemap_scan_till_end()?;
+    assert!(
+        reset_state.is_regions_empty(),
+        "Expected empty reset state after WP clear: {}",
+        reset_state
     );
     Ok(ResultStat {
         scan: scan_res,
@@ -312,8 +316,9 @@ fn main() -> Result<()> {
     let mut srng = StdRng::seed_from_u64(cli.seed);
 
     let mut run_call = |s: &mut [u8]| run_harness(s, cli.num_ops, normal, &mut srng);
+    let total_runs = cli.runs + cli.warmup_runs;
     let results = match cli.strategy {
-        DirtyTrackingStrategy::EmulatedSoftDirty => (0..cli.runs)
+        DirtyTrackingStrategy::EmulatedSoftDirty => (0..total_runs)
             .enumerate()
             .map(|(i, _)| {
                 log::info!("Starting Emulated Soft-Dirty run {i}...");
@@ -327,7 +332,7 @@ fn main() -> Result<()> {
             })
             .collect::<Result<Vec<_>>>()?,
 
-        DirtyTrackingStrategy::SoftDirty => (0..cli.runs)
+        DirtyTrackingStrategy::SoftDirty => (0..total_runs)
             .enumerate()
             .map(|(i, _)| {
                 log::info!("Starting Soft-Dirty run {i}...");
@@ -363,7 +368,7 @@ fn main() -> Result<()> {
             }
 
             // Perform benchmark runs
-            (0..cli.runs)
+            (0..total_runs)
                 .enumerate()
                 .map(|(i, _)| {
                     log::info!("Starting UFFD run {i}...");

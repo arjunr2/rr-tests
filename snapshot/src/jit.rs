@@ -4,6 +4,8 @@ use std::num::NonZeroUsize;
 use std::ops::Range;
 use std::ptr;
 
+use crate::pagemap::PageNum;
+
 pub struct JittedFn {
     ptr: *mut u8,
     size: usize,
@@ -96,6 +98,10 @@ impl JitCompiler {
                 _ => panic!("Unsupported len"),
             }
 
+            //log::trace!(
+            //    "Write: {}",
+            //    PageNum::range_string_from_addr(write.start, write.end, 0).unwrap()
+            //);
             // --- WRITE ---
             self.emit_load_rax_imm64(write.start as u64);
             match write.len() {

@@ -205,19 +205,9 @@ pub struct PageMapScanResult {
 }
 
 impl PageMapScanResult {
-    //fn from_raw(raw: PageMapScanResultRaw, relative_start: usize) -> Result<Self> {
-    //    let walk_start = PageNum::from_addr_relative(raw.start_addr as usize, relative_start)?;
-    //    let walk_end = PageNum::from_addr_relative(raw.walk_end as usize, relative_start)?;
-    //    Ok(Self {
-    //        walk_start,
-    //        walk_end,
-    //        regions: raw
-    //            .regions
-    //            .into_iter()
-    //            .map(|r| PageRegion::from_raw(r, relative_start))
-    //            .collect::<Result<Vec<PageRegion>>>()?,
-    //    })
-    //}
+    pub fn is_regions_empty(&self) -> bool {
+        self.regions.is_empty()
+    }
 
     pub fn from_bitmap(bitmap: SoftDirtyBitmap, categories: Categories) -> Self {
         let bitmap = bitmap.0;
@@ -402,7 +392,6 @@ impl PmScanArgBuilder {
 
 /// This doesn't clear WRITTEN bit; only SOFT_DIRTY. Need mprotect for that.
 pub fn clear_soft_dirty_global() -> Result<()> {
-    log::trace!("Clearing soft-dirty bits globally...");
     let mut file = &*CLEAR_REFS_FILE;
     file.write_all(b"4")?;
     file.flush()?;
