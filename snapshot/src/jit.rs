@@ -4,8 +4,6 @@ use std::num::NonZeroUsize;
 use std::ops::Range;
 use std::ptr;
 
-use crate::pagemap::PageNum;
-
 pub struct JittedFn {
     ptr: *mut u8,
     size: usize,

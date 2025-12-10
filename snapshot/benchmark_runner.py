@@ -5,13 +5,6 @@ import json
 import sys
 import os
 import statistics
-from collections import defaultdict
-
-# Try importing matplotlib
-try:
-    import matplotlib.pyplot as plt
-except ImportError:
-    plt = None
 
 def extract_page_num(val):
     if isinstance(val, list):
@@ -109,122 +102,12 @@ def run_benchmark(n, d, r, binary_path):
     
     return results
 
-def plot_results(all_results, n_values, d_values):
-    if not plt:
-        print("Matplotlib not found, skipping plots.")
-        return
-
-    # Create plots directory if it doesn't exist
-    os.makedirs("plots", exist_ok=True)
-
-    strategies = ["Uffd", "SoftDirty", "EmulatedSoftDirty"]
-    
-    # Plot 1: Fixed D, X=N, Y=Time
-    for d in d_values:
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-        fig.suptitle(f"Benchmark Results (d={d})")
-        
-        # Plot Scan Time
-        for strat in strategies:
-            x = []
-            y = []
-            yerr = []
-            for n in sorted(n_values):
-                res = all_results.get((n, d), {}).get(strat)
-                if res:
-                    x.append(n)
-                    y.append(res["scan_avg"])
-                    yerr.append(res["scan_stdev"])
-            ax1.errorbar(x, y, yerr=yerr, label=strat, marker='o', capsize=5)
-        
-        ax1.set_title("Scan Time vs N")
-        ax1.set_xlabel("N (ops)")
-        ax1.set_xscale('log', base=10)
-        ax1.set_ylabel("Time (µs)")
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-
-        # Plot Harness Time
-        for strat in strategies:
-            x = []
-            y = []
-            yerr = []
-            for n in sorted(n_values):
-                res = all_results.get((n, d), {}).get(strat)
-                if res:
-                    x.append(n)
-                    y.append(res["harness_avg"])
-                    yerr.append(res["harness_stdev"])
-            ax2.errorbar(x, y, yerr=yerr, label=strat, marker='o', capsize=5)
-            
-        ax2.set_title("Harness Time vs N")
-        ax2.set_xlabel("N (ops)")
-        ax2.set_xscale('log', base=10)
-        ax2.set_ylabel("Time (µs)")
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        filename = f"plots/benchmark_d_{d}.png"
-        plt.savefig(filename)
-        print(f"Saved plot to {filename}")
-
-    # Plot 2: Fixed N, X=D, Y=Time
-    for n in n_values:
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-        fig.suptitle(f"Benchmark Results (n={n})")
-        
-        # Plot Scan Time
-        for strat in strategies:
-            x = []
-            y = []
-            yerr = []
-            for d in sorted(d_values):
-                res = all_results.get((n, d), {}).get(strat)
-                if res:
-                    x.append(d)
-                    y.append(res["scan_avg"])
-                    yerr.append(res["scan_stdev"])
-            ax1.errorbar(x, y, yerr=yerr, label=strat, marker='o', capsize=5)
-        
-        ax1.set_title("Scan Time vs D")
-        ax1.set_xlabel("D (stddev)")
-        ax1.set_xscale('log', base=2)
-        ax1.set_ylabel("Time (µs)")
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-
-        # Plot Harness Time
-        for strat in strategies:
-            x = []
-            y = []
-            yerr = []
-            for d in sorted(d_values):
-                res = all_results.get((n, d), {}).get(strat)
-                if res:
-                    x.append(d)
-                    y.append(res["harness_avg"])
-                    yerr.append(res["harness_stdev"])
-            ax2.errorbar(x, y, yerr=yerr, label=strat, marker='o', capsize=5)
-            
-        ax2.set_title("Harness Time vs D")
-        ax2.set_xlabel("D (stddev)")
-        ax2.set_xscale('log', base=2)
-        ax2.set_ylabel("Time (µs)")
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        filename = f"plots/benchmark_n_{n}.png"
-        plt.savefig(filename)
-        print(f"Saved plot to {filename}")
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--n", "-n", nargs="+", type=int, required=True, help="List of N values")
     parser.add_argument("--d", "-d", nargs="+", type=float, required=True, help="List of D values")
     parser.add_argument("--runs", "-r", type=int, default=20, help="Number of runs")
+    parser.add_argument("--output", "-o", type=str, default="benchmark_results.json", help="Output JSON file")
     args = parser.parse_args()
 
     # Build
@@ -233,11 +116,21 @@ def main():
     binary_path = "../target/release/snapshot"
 
     all_results = {}
+    # Structure for JSON output: list of objects with n, d, results
+    output_data = []
 
     for n in args.n:
         for d in args.d:
             try:
                 res = run_benchmark(n, d, args.runs, binary_path)
+                # Convert tuple key to string for JSON compatibility if needed, 
+                # but better to structure as list of objects
+                entry = {
+                    "n": n,
+                    "d": d,
+                    "results": res
+                }
+                output_data.append(entry)
                 all_results[(n, d)] = res
             except Exception as e:
                 print(f"Benchmark failed for n={n}, d={d}: {e}")
@@ -251,7 +144,10 @@ def main():
         for strat, metrics in res_map.items():
             print(f"{n:<10} | {d:<10} | {strat:<20} | {metrics['scan_avg']:<10.2f} | {metrics['harness_avg']:<10.2f}")
 
-    plot_results(all_results, args.n, args.d)
+    # Save to JSON
+    with open(args.output, 'w') as f:
+        json.dump(output_data, f, indent=2)
+    print(f"\nResults saved to {args.output}")
 
 if __name__ == "__main__":
     main()
