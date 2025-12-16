@@ -5,6 +5,8 @@ import json
 import sys
 import os
 import statistics
+import time
+import random
 
 def extract_page_num(val):
     if isinstance(val, list):
@@ -51,7 +53,9 @@ def run_benchmark(n, d, r, binary_path):
     strategies = ["uffd", "soft-dirty", "emulated-soft-dirty"]
     files = {}
     
-    print(f"Running benchmark for n={n}, d={d}...")
+    # Generate a random seed for this set of runs so all strategies use the same access pattern
+    seed = random.randint(0, 2**64 - 1)
+    print(f"Running benchmark for n={n}, d={d}, seed={seed}...")
 
     for strat in strategies:
         outfile = f"{strat}_{n}_{d}.json"
@@ -60,6 +64,7 @@ def run_benchmark(n, d, r, binary_path):
             "-d", str(d),
             "-n", str(n),
             "-r", str(r),
+            "--seed", str(seed),
             strat,
             "-o", outfile
         ]

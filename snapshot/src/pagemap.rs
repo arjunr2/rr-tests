@@ -8,6 +8,7 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 use std::sync::LazyLock;
+use std::time::Instant;
 
 use crate::SoftDirtyBitmap;
 
@@ -79,6 +80,7 @@ impl PageNum {
         ))
     }
 
+    #[allow(dead_code)]
     pub fn range_string_from_addr(
         start: usize,
         end: usize,
@@ -172,13 +174,6 @@ pub struct PageRegionRaw {
     pub categories: Categories,
 }
 
-//#[derive(Default, Debug, Clone)]
-//struct PageMapScanResultRaw {
-//    start_addr: u64,
-//    regions: Vec<PageRegionRaw>,
-//    walk_end: u64,
-//}
-
 #[derive(Clone, Debug, Serialize)]
 pub struct PageRegion {
     pub start: PageNum,
@@ -268,7 +263,10 @@ impl fmt::Display for PageMapScanResult {
 }
 
 impl PmScanArg {
-    pub fn run_pagemap_scan_till_end(&mut self) -> Result<PageMapScanResult> {
+    pub fn run_pagemap_scan_till_end(
+        &mut self,
+        mut active_timer: Option<&mut Instant>,
+    ) -> Result<PageMapScanResult> {
         let initial_start = self.start;
         let target_end = self.end;
         let mut all_regions = Vec::new();
@@ -301,8 +299,16 @@ impl PmScanArg {
                 regions.set_len(result as usize);
             }
 
-            for raw_region in regions {
-                all_regions.push(PageRegion::from_raw(raw_region, initial_start as usize)?);
+            if let Some(ref mut timer) = active_timer {
+                let start_copy = Instant::now();
+                for raw_region in regions {
+                    all_regions.push(PageRegion::from_raw(raw_region, initial_start as usize)?);
+                }
+                **timer += start_copy.elapsed();
+            } else {
+                for raw_region in regions {
+                    all_regions.push(PageRegion::from_raw(raw_region, initial_start as usize)?);
+                }
             }
 
             // Update output walk end, and break out if done
