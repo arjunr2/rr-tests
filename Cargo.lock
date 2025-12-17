@@ -2585,6 +2585,7 @@ dependencies = [
  "wasmtime-internal-unwinder 40.0.0",
  "wasmtime-internal-versioned-export-macros 40.0.0",
  "wasmtime-internal-winch 40.0.0",
+ "wasmtime-rr",
  "wat",
  "windows-sys 0.61.2",
 ]
@@ -2963,6 +2964,19 @@ dependencies = [
  "heck",
  "indexmap",
  "wit-parser 0.241.2",
+]
+
+[[package]]
+name = "wasmtime-rr"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "cfg-if",
+ "log",
+ "postcard",
+ "serde",
+ "serde_derive",
+ "wasmtime-environ 40.0.0",
 ]
 
 [[package]]

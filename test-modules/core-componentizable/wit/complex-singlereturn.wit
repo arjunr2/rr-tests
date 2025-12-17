@@ -1,12 +1,14 @@
-package component:test-package;
+package root:component;
 
-interface env {
+world root {
+  import component:test-package/env;
+
+  export main: func(x: u32) -> u32;
+}
+package component:test-package {
+  interface env {
     double: func(x: u32) -> u32;
+
     complex: func(x: u32, y: u64) -> u64;
+  }
 }
-
-world complex-world {
-    import env;
-    export main: func(x: u32) -> u32;
-}
-
