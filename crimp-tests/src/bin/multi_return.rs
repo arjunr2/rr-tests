@@ -6,7 +6,7 @@ impl component::test_package::env::Host for MyState {
     }
 }
 
-wasmtime_rr_tests::bin!(@uses);
+crimp_tests::bin!(@uses);
 
 bindgen!(
     "my-world" in "../test-modules/components/wit/multi_return.wit"
@@ -15,7 +15,7 @@ bindgen!(
 fn main() -> Result<()> {
     component_run::<_, RunTy, (u32,), (u32,)>(
         ComponentFmt::File("test-modules/components/multi_return.wat"),
-        |mut linker| wasmtime_rr_tests::bin!(@add linker, MyWorld),
+        |mut linker| crimp_tests::bin!(@add linker, MyWorld),
         RunMode::InstantiateAndCallNTimes {
             name: "main",
             params: (42,),

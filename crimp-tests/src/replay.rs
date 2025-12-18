@@ -6,7 +6,7 @@ use std::io::BufReader;
 use wasmtime::component::Component;
 use wasmtime::{Config, Engine, OptLevel, RRConfig, ReplayEnvironment, ReplaySettings};
 
-use wasmtime_rr_tests::Knobs;
+use crimp_tests::Knobs;
 
 #[derive(Parser)]
 #[command(version, about = "Replay Harness for Wasmtime RR Traces", long_about=None)]

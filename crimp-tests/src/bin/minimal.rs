@@ -1,4 +1,4 @@
-wasmtime_rr_tests::bin!(@uses);
+crimp_tests::bin!(@uses);
 
 fn main() -> Result<()> {
     component_run::<_, RunTy, (), (u32,)>(

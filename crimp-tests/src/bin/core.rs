@@ -1,7 +1,7 @@
 use std::error::Error;
 use wasmtime::*;
 
-use wasmtime_rr_tests::*;
+use crimp_tests::*;
 
 // Import handler implementations
 fn host_double_fn(param: i32) -> i32 {

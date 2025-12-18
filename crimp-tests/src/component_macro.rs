@@ -8,7 +8,7 @@ macro_rules! bin {
         use wasmtime::component::{Component, Linker};
         use wasmtime::component::{ComponentNamedList, HasSelf, Instance, Lift, Lower, bindgen};
         use wasmtime::{Engine, Store};
-        use wasmtime_rr_tests::*;
+        use crimp_tests::*;
     };
 
     (@add $linker:ident, $st:ident) => {

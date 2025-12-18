@@ -1,4 +1,4 @@
-wasmtime_rr_tests::bin!(@uses);
+crimp_tests::bin!(@uses);
 
 bindgen!(
     "my-world" in "../test-modules/components/wit/variant_large.wit"
@@ -89,7 +89,7 @@ fn main() -> Result<()> {
 
     component_run::<_, RunTy, (DataPayload,), (String,)>(
         ComponentFmt::File("test-modules/components/variant_large.wat"),
-        |mut linker| wasmtime_rr_tests::bin!(@add linker, MyWorld),
+        |mut linker| crimp_tests::bin!(@add linker, MyWorld),
         RunMode::InstantiateAndCallOnce {
             name: "main",
             params: (input,),
