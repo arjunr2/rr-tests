@@ -1,13 +1,15 @@
 [package]
 name = "snapshot"
 edition = "2024"
+authors.workspace = true
+version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
 env_logger.workspace = true
+log.workspace = true
 rand = "0.8"
-log = "0.4.28"
 libc = "0.2.177"
 rayon = "1.11.0"
 bitflags = "2.10.0"

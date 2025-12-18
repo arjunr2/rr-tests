@@ -1,0 +1,14 @@
+[package]
+name = "crimp-driver"
+edition = "2024"
+authors.workspace = true
+version.workspace = true
+
+[dependencies]
+env_logger.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+log.workspace = true
+wirm = "2.2.0"
+wasm-crimp = { path = "../../wasmtime-rr-prototyping/crates/wasm-crimp" }
+wat = "1.243.0"
