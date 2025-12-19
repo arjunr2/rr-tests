@@ -13,8 +13,8 @@ anyhow.workspace = true
 clap.workspace = true
 env_logger.workspace = true
 prime_factorization.workspace = true
-wasmtime = { path = "../../wasmtime-rr-prototyping/crates/wasmtime", features = ["default"] }
-wasmtime-wasi = { path = "../../wasmtime-rr-prototyping/crates/wasi", features = ["default"] }
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
 
 [features]
 rr = ["wasmtime/rr"]
