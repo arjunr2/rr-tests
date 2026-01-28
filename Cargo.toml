@@ -3,7 +3,7 @@ members = [
     "crimp-tests",
     "snapshot",
     "wasi-modules",
-    "crimp-driver"]
+    "crimp-decompose"]
 resolver = "3"
 
 [workspace.package]
@@ -16,6 +16,9 @@ prime_factorization = "1.0.5"
 env_logger = "0.11.8"
 anyhow = "1.0.100"
 log = "0.4.28"
+#wasmtime = { path = "../wasmtime-rr-prototyping/crates/wasmtime" }
+#wasmtime-wasi = { path = "../wasmtime-rr-prototyping/crates/wasi", features = ["default"] }
+#wasm-crimp = { path = "../wasmtime-rr-prototyping/crates/wasm-crimp", features = ["std"] }
 wasmtime = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["default"] }
 wasmtime-wasi = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["default"] }
 wasm-crimp = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["std"] }

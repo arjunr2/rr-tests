@@ -1,5 +1,5 @@
 [package]
-name = "crimp-driver"
+name = "crimp-decompose"
 edition = "2024"
 authors.workspace = true
 version.workspace = true
@@ -10,5 +10,6 @@ anyhow.workspace = true
 clap.workspace = true
 log.workspace = true
 wasm-crimp.workspace = true
-wirm = "2.2.0"
+wirm = {path = "../../wirm" }
 wat = "1.243.0"
+wasmprinter = "0.244.0"
