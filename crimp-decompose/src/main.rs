@@ -55,15 +55,17 @@ struct ComponentDecomposed<'a> {
 }
 
 #[derive(Debug, Default, Clone)]
-struct CrimpReplayMetadata {}
+struct CrimpReplayMetadata<'a> {
+    modules: Vec<Module<'a>>,
+}
 
 impl<'a> ComponentDecomposed<'a> {
     /// Produce a [ComponentDecomposed] from a [Component]
-    fn from_component(component: Component<'a>) -> Self {
+    fn from_component(component: Component<'a>) -> Result<Self> {
         let accessor = ComponentAccessor::from(component);
         accessor.assert_assumptions();
 
-        let mut ret = ComponentDecomposed::default();
+        let mut metadata = CrimpReplayMetadata::default();
 
         // Populate the modules that the component will be decomposed into
         for (i, mut module) in accessor.module_list().into_iter().enumerate() {
@@ -75,10 +77,14 @@ impl<'a> ComponentDecomposed<'a> {
                 name: "crimp-replay",
                 data: Cow::from(b""),
             });
-            ret.modules.push(module);
+            metadata.modules.push(module);
         }
 
-        ret
+        accessor.instantiate_commands()?;
+
+        Ok(ComponentDecomposed {
+            modules: metadata.modules,
+        })
     }
 
     fn dump_to_files(self, wat: bool, outdir: &PathBuf) -> Result<()> {
@@ -108,7 +114,7 @@ fn main() -> Result<()> {
     }
     fs::create_dir(&cli.outdir)?;
     let component = Component::parse(&file, true, true).unwrap();
-    let decomposed = ComponentDecomposed::from_component(component);
+    let decomposed = ComponentDecomposed::from_component(component)?;
     decomposed.dump_to_files(cli.wat, &cli.outdir)?;
     Ok(())
 }
