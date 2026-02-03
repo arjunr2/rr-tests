@@ -1,0 +1,12 @@
+package root:component;
+
+world root {
+  import component:test-package/env;
+
+  export main: func(x: u32) -> u32;
+}
+package component:test-package {
+  interface env {
+    double: func(x: u32) -> u32;
+  }
+}
