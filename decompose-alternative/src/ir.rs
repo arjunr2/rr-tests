@@ -13,16 +13,16 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
 /// Shared reference to a Component (Rc + RefCell for interior mutability).
-pub type ComponentRef = Rc<RefCell<Component>>;
+pub type ComponentRef<'a> = Rc<RefCell<Component<'a>>>;
 /// Weak reference to a Component for parent chains.
-pub type ComponentWeak = Weak<RefCell<Component>>;
+pub type ComponentWeak<'a> = Weak<RefCell<Component<'a>>>;
 
 /// A parent scope for Outer alias resolution.
 /// In the Component Model, parent scopes can be Components, ComponentTypes, or InstanceTypes.
 #[derive(Debug, Clone)]
-pub enum ParentScope {
+pub enum ParentScope<'a> {
     /// Parent is a Component
-    Component(ComponentWeak),
+    Component(ComponentWeak<'a>),
     /// Parent is a ComponentType definition (placeholder - has its own index spaces)
     ComponentType,
     /// Parent is an InstanceType definition (placeholder - has its own index spaces)
@@ -48,18 +48,18 @@ pub struct ImportRef {
 }
 
 /// A parsed WebAssembly Component with all 12 index spaces accessible.
-#[derive(Debug, Default)]
-pub struct Component {
+#[derive(Debug)]
+pub struct Component<'a> {
     /// Parent scopes for Outer alias resolution.
     /// Ordered innermost to outermost: parents[0] is the immediate parent.
-    pub parents: Vec<ParentScope>,
+    pub parents: Vec<ParentScope<'a>>,
 
     /// All imports in order they appear, with references to their location in index spaces.
     pub imports: Vec<ImportRef>,
 
     // Component-level index spaces
-    pub modules: IndexSpace<ModuleNode>,
-    pub components: IndexSpace<ComponentNode>,
+    pub modules: IndexSpace<ModuleNode<'a>>,
+    pub components: IndexSpace<ComponentNode<'a>>,
     pub instances: IndexSpace<ComponentInstanceNode>,
     pub funcs: IndexSpace<ComponentFuncNode>,
     pub values: IndexSpace<ValueNode>,
@@ -75,4 +75,26 @@ pub struct Component {
 
     // Exports (name -> what is exported)
     pub exports: IndexMap<String, ExportNode>,
+}
+
+impl<'a> Default for Component<'a> {
+    fn default() -> Self {
+        Self {
+            parents: Vec::new(),
+            imports: Vec::new(),
+            modules: IndexSpace::default(),
+            components: IndexSpace::default(),
+            instances: IndexSpace::default(),
+            funcs: IndexSpace::default(),
+            values: IndexSpace::default(),
+            types: IndexSpace::default(),
+            core_instances: IndexSpace::default(),
+            core_funcs: IndexSpace::default(),
+            core_memories: IndexSpace::default(),
+            core_tables: IndexSpace::default(),
+            core_globals: IndexSpace::default(),
+            core_types: IndexSpace::default(),
+            exports: IndexMap::new(),
+        }
+    }
 }

@@ -4,10 +4,10 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
-use wasmparser::Validator;
 
 use decompose_alternative::ir::ResolvedModule;
 use decompose_alternative::parse_component;
+use decompose_alternative::wasmparser::Validator;
 
 #[derive(Parser, Debug)]
 #[command(name = "decompose")]
@@ -45,12 +45,13 @@ fn main() -> Result<()> {
 
     // Extract and write modules
     let component_ref = component.borrow();
+    println!("{:?}", component_ref);
     let mut module_count = 0;
 
     for (idx, _module_node) in component_ref.modules.iter() {
         let resolved = component_ref.resolve_module(idx);
         match resolved {
-            ResolvedModule::Defined { module } => {
+            ResolvedModule::Defined { mut module } => {
                 // Re-encode the module from the parsed IR
                 let encoded_bytes = module.encode();
 
@@ -69,7 +70,7 @@ fn main() -> Result<()> {
                     fs::write(&output_path, &encoded_bytes)?;
                 }
 
-                println!("Module writing: {:?}", module);
+                //println!("Module writing: {:?}", module);
                 module_count += 1;
             }
             ResolvedModule::Imported { name, .. } => {
@@ -77,8 +78,6 @@ fn main() -> Result<()> {
             }
         }
     }
-
-    println!("\nDecomposed {} modules to {:?}", module_count, cli.outdir);
 
     Ok(())
 }

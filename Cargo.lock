@@ -557,10 +557,9 @@ dependencies = [
  "anyhow",
  "clap",
  "indexmap",
- "wasm-encoder 0.244.0",
- "wasmparser 0.244.0",
  "wasmprinter 0.244.0",
  "wat",
+ "wirm",
 ]
 
 [[package]]

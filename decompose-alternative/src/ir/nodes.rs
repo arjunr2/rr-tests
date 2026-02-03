@@ -3,7 +3,8 @@
 //! Each node type has specialized variants reflecting how items
 //! in that index space can be introduced (Import, Alias, Definition, etc.)
 
-use crate::module::Module;
+use wirm::Module;
+use wirm::wasmparser::CanonicalOption;
 
 // =============================================================================
 // Common Info Types
@@ -33,27 +34,27 @@ pub enum AliasInfo {
 
 /// A core WebAssembly module in the module index space.
 #[derive(Debug, Clone)]
-pub enum ModuleNode {
+pub enum ModuleNode<'a> {
     Imported(ImportInfo),
     Aliased(AliasInfo),
     Defined {
-        /// Parsed module IR
-        module: Module,
+        /// Parsed module IR from wirm
+        module: Module<'a>,
     },
 }
 
 /// A nested component in the component index space.
 #[derive(Debug)]
-pub enum ComponentNode {
+pub enum ComponentNode<'a> {
     Imported(ImportInfo),
     Aliased(AliasInfo),
     Defined {
         /// Recursively parsed component (Rc<RefCell> for shared access and parent chain setup)
-        component: super::ComponentRef,
+        component: super::ComponentRef<'a>,
     },
 }
 
-impl Clone for ComponentNode {
+impl<'a> Clone for ComponentNode<'a> {
     fn clone(&self) -> Self {
         match self {
             Self::Imported(info) => Self::Imported(info.clone()),
@@ -119,7 +120,7 @@ pub enum ComponentFuncNode {
     Lifted {
         core_func_idx: u32,
         type_idx: u32,
-        options: Vec<CanonOpt>,
+        options: Vec<CanonicalOption>,
     },
 }
 
@@ -187,7 +188,7 @@ pub enum CoreFuncNode {
     /// Created by `canon lower`
     Lowered {
         func_idx: u32,
-        options: Vec<CanonOpt>,
+        options: Vec<CanonicalOption>,
     },
 }
 
@@ -258,38 +259,30 @@ pub enum CoreExportKind {
 }
 
 // =============================================================================
-// Canonical Options
-// =============================================================================
-
-#[derive(Debug, Clone)]
-pub enum CanonOpt {
-    Utf8,
-    Utf16,
-    CompactUtf16,
-    Memory(u32),
-    Realloc(u32),
-    PostReturn(u32),
-}
-
-// =============================================================================
 // Resolved Types (without Aliased variants)
 // =============================================================================
 
 /// Resolved module - either imported or defined inline.
 #[derive(Debug, Clone)]
-pub enum ResolvedModule {
-    Imported { name: String, url: Option<String> },
-    Defined { module: Module },
+pub enum ResolvedModule<'a> {
+    Imported {
+        name: String,
+        url: Option<String>,
+    },
+    /// A defined module with its parsed IR.
+    Defined {
+        module: Module<'a>,
+    },
 }
 
 /// Resolved component - either imported or defined inline.
 #[derive(Debug)]
-pub enum ResolvedComponent {
+pub enum ResolvedComponent<'a> {
     Imported { name: String, url: Option<String> },
-    Defined { component: super::ComponentRef },
+    Defined { component: super::ComponentRef<'a> },
 }
 
-impl Clone for ResolvedComponent {
+impl<'a> Clone for ResolvedComponent<'a> {
     fn clone(&self) -> Self {
         match self {
             Self::Imported { name, url } => Self::Imported {
@@ -306,7 +299,10 @@ impl Clone for ResolvedComponent {
 /// Resolved component instance.
 #[derive(Debug, Clone)]
 pub enum ResolvedInstance {
-    Imported { name: String, url: Option<String> },
+    Imported {
+        name: String,
+        url: Option<String>,
+    },
     Instantiated {
         component_idx: u32,
         args: Vec<InstantiationArg>,
@@ -317,11 +313,14 @@ pub enum ResolvedInstance {
 /// Resolved component function.
 #[derive(Debug, Clone)]
 pub enum ResolvedFunc {
-    Imported { name: String, url: Option<String> },
+    Imported {
+        name: String,
+        url: Option<String>,
+    },
     Lifted {
         core_func_idx: u32,
         type_idx: u32,
-        options: Vec<CanonOpt>,
+        options: Vec<CanonicalOption>,
     },
 }
 
@@ -353,7 +352,10 @@ pub enum ResolvedCoreInstance {
 #[derive(Debug, Clone)]
 pub enum ResolvedCoreFunc {
     /// Created by `canon lower`
-    Lowered { func_idx: u32, options: Vec<CanonOpt> },
+    Lowered {
+        func_idx: u32,
+        options: Vec<CanonicalOption>,
+    },
     /// From a module's export (traced through core instance)
     FromModule { module_idx: u32, func_idx: u32 },
 }

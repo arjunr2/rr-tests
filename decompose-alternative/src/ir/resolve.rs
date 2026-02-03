@@ -16,29 +16,30 @@ use super::{
     ResolvedCoreType, ResolvedFunc, ResolvedInstance, ResolvedModule, ResolvedType, ResolvedValue,
     TypeNode, ValueNode,
 };
+use wirm::wasmparser::ExternalKind;
 
 // =============================================================================
 // Resolve Trait
 // =============================================================================
 
 /// Trait for node types that can be resolved to a root (non-aliased) form.
-pub trait Resolve {
+pub trait Resolve<'a> {
     /// The resolved type without `Aliased` variants.
     type Root;
 
     /// Resolve a node at the given index to its root form.
     /// Follows all alias chains until reaching a definition or import.
-    fn resolve(component: &Component, idx: u32) -> Self::Root;
+    fn resolve(component: &Component<'a>, idx: u32) -> Self::Root;
 }
 
 // =============================================================================
 // Helper Methods on Component
 // =============================================================================
 
-impl Component {
+impl<'a> Component<'a> {
     /// Get a parent Component by count (1 = immediate parent, 2 = grandparent, etc.)
     /// Panics if the parent doesn't exist or is not a Component.
-    fn get_parent_component(&self, count: u32) -> ComponentRef {
+    fn get_parent_component(&self, count: u32) -> ComponentRef<'a> {
         if count == 0 {
             panic!("Outer alias count=0 is invalid (refers to current scope)");
         }
@@ -69,7 +70,7 @@ impl Component {
         instance_idx: u32,
         name: &str,
         expected_kind: ExportKind,
-    ) -> (ComponentRef, u32) {
+    ) -> (ComponentRef<'a>, u32) {
         let instance = self
             .instances
             .get(instance_idx)
@@ -164,6 +165,7 @@ impl Component {
 
                 match module_node {
                     ModuleNode::Defined { module } => {
+                        // Access module exports directly
                         let export = module
                             .exports
                             .iter()
@@ -174,11 +176,12 @@ impl Component {
 
                         // Verify the export kind matches
                         let actual_kind = match export.kind {
-                            crate::module::ExportKind::Func => CoreExportKind::Func,
-                            crate::module::ExportKind::Table => CoreExportKind::Table,
-                            crate::module::ExportKind::Memory => CoreExportKind::Memory,
-                            crate::module::ExportKind::Global => CoreExportKind::Global,
-                            crate::module::ExportKind::Tag => CoreExportKind::Tag,
+                            ExternalKind::Func => CoreExportKind::Func,
+                            ExternalKind::FuncExact => CoreExportKind::Func,
+                            ExternalKind::Table => CoreExportKind::Table,
+                            ExternalKind::Memory => CoreExportKind::Memory,
+                            ExternalKind::Global => CoreExportKind::Global,
+                            ExternalKind::Tag => CoreExportKind::Tag,
                         };
                         if actual_kind != expected_kind {
                             panic!(
@@ -262,10 +265,10 @@ impl Component {
 // Resolve Implementations
 // =============================================================================
 
-impl Resolve for ModuleNode {
-    type Root = ResolvedModule;
+impl<'a> Resolve<'a> for ModuleNode<'a> {
+    type Root = ResolvedModule<'a>;
 
-    fn resolve(component: &Component, idx: u32) -> Self::Root {
+    fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.modules.get(idx) {
             Some(ModuleNode::Defined { module }) => ResolvedModule::Defined {
                 module: module.clone(),
@@ -280,8 +283,8 @@ impl Resolve for ModuleNode {
     }
 }
 
-impl ModuleNode {
-    fn follow_alias(component: &Component, alias: &AliasInfo) -> ResolvedModule {
+impl<'a> ModuleNode<'a> {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedModule<'a> {
         match alias {
             AliasInfo::InstanceExport { instance_idx, name } => {
                 let (nested_ref, export_idx) =
@@ -301,10 +304,10 @@ impl ModuleNode {
     }
 }
 
-impl Resolve for ComponentNode {
-    type Root = ResolvedComponent;
+impl<'a> Resolve<'a> for ComponentNode<'a> {
+    type Root = ResolvedComponent<'a>;
 
-    fn resolve(component: &Component, idx: u32) -> Self::Root {
+    fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.components.get(idx) {
             Some(ComponentNode::Defined { component: nested }) => ResolvedComponent::Defined {
                 component: nested.clone(),
@@ -319,8 +322,8 @@ impl Resolve for ComponentNode {
     }
 }
 
-impl ComponentNode {
-    fn follow_alias(component: &Component, alias: &AliasInfo) -> ResolvedComponent {
+impl<'a> ComponentNode<'a> {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedComponent<'a> {
         match alias {
             AliasInfo::InstanceExport { instance_idx, name } => {
                 let (nested_ref, export_idx) =
@@ -340,10 +343,10 @@ impl ComponentNode {
     }
 }
 
-impl Resolve for ComponentInstanceNode {
+impl<'a> Resolve<'a> for ComponentInstanceNode {
     type Root = ResolvedInstance;
 
-    fn resolve(component: &Component, idx: u32) -> Self::Root {
+    fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.instances.get(idx) {
             Some(ComponentInstanceNode::Instantiated {
                 component_idx,
@@ -365,8 +368,8 @@ impl Resolve for ComponentInstanceNode {
     }
 }
 
-impl ComponentInstanceNode {
-    fn follow_alias(component: &Component, alias: &AliasInfo) -> ResolvedInstance {
+impl<'a> ComponentInstanceNode {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedInstance {
         match alias {
             AliasInfo::InstanceExport { instance_idx, name } => {
                 let (nested_ref, export_idx) =
@@ -386,10 +389,10 @@ impl ComponentInstanceNode {
     }
 }
 
-impl Resolve for ComponentFuncNode {
+impl<'a> Resolve<'a> for ComponentFuncNode {
     type Root = ResolvedFunc;
 
-    fn resolve(component: &Component, idx: u32) -> Self::Root {
+    fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.funcs.get(idx) {
             Some(ComponentFuncNode::Lifted {
                 core_func_idx,
@@ -410,8 +413,8 @@ impl Resolve for ComponentFuncNode {
     }
 }
 
-impl ComponentFuncNode {
-    fn follow_alias(component: &Component, alias: &AliasInfo) -> ResolvedFunc {
+impl<'a> ComponentFuncNode {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedFunc {
         match alias {
             AliasInfo::InstanceExport { instance_idx, name } => {
                 let (nested_ref, export_idx) =
@@ -431,10 +434,10 @@ impl ComponentFuncNode {
     }
 }
 
-impl Resolve for ValueNode {
+impl<'a> Resolve<'a> for ValueNode {
     type Root = ResolvedValue;
 
-    fn resolve(component: &Component, idx: u32) -> Self::Root {
+    fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.values.get(idx) {
             Some(ValueNode::Imported(info)) => ResolvedValue {
                 name: info.name.clone(),
@@ -446,8 +449,8 @@ impl Resolve for ValueNode {
     }
 }
 
-impl ValueNode {
-    fn follow_alias(component: &Component, alias: &AliasInfo) -> ResolvedValue {
+impl<'a> ValueNode {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedValue {
         match alias {
             AliasInfo::InstanceExport { instance_idx, name } => {
                 let (nested_ref, export_idx) =
@@ -467,10 +470,10 @@ impl ValueNode {
     }
 }
 
-impl Resolve for TypeNode {
+impl<'a> Resolve<'a> for TypeNode {
     type Root = ResolvedType;
 
-    fn resolve(component: &Component, idx: u32) -> Self::Root {
+    fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.types.get(idx) {
             Some(TypeNode::Defined(def)) => ResolvedType::Defined(def.clone()),
             Some(TypeNode::Imported(info)) => ResolvedType::Imported {
@@ -483,8 +486,8 @@ impl Resolve for TypeNode {
     }
 }
 
-impl TypeNode {
-    fn follow_alias(component: &Component, alias: &AliasInfo) -> ResolvedType {
+impl<'a> TypeNode {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedType {
         match alias {
             AliasInfo::InstanceExport { instance_idx, name } => {
                 let (nested_ref, export_idx) =
@@ -508,10 +511,10 @@ impl TypeNode {
 // Core Node Resolution
 // =============================================================================
 
-impl Resolve for CoreInstanceNode {
+impl<'a> Resolve<'a> for CoreInstanceNode {
     type Root = ResolvedCoreInstance;
 
-    fn resolve(component: &Component, idx: u32) -> Self::Root {
+    fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.core_instances.get(idx) {
             Some(CoreInstanceNode::Instantiated { module_idx, args }) => {
                 ResolvedCoreInstance::Instantiated {
@@ -528,8 +531,8 @@ impl Resolve for CoreInstanceNode {
     }
 }
 
-impl CoreInstanceNode {
-    fn follow_alias(component: &Component, alias: &AliasInfo) -> ResolvedCoreInstance {
+impl<'a> CoreInstanceNode {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedCoreInstance {
         match alias {
             AliasInfo::Outer { count, index } => {
                 let parent_ref = component.get_parent_component(*count);
@@ -546,10 +549,10 @@ impl CoreInstanceNode {
     }
 }
 
-impl Resolve for CoreFuncNode {
+impl<'a> Resolve<'a> for CoreFuncNode {
     type Root = ResolvedCoreFunc;
 
-    fn resolve(component: &Component, idx: u32) -> Self::Root {
+    fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.core_funcs.get(idx) {
             Some(CoreFuncNode::Lowered { func_idx, options }) => ResolvedCoreFunc::Lowered {
                 func_idx: *func_idx,
@@ -561,8 +564,8 @@ impl Resolve for CoreFuncNode {
     }
 }
 
-impl CoreFuncNode {
-    fn follow_alias(component: &Component, alias: &AliasInfo) -> ResolvedCoreFunc {
+impl<'a> CoreFuncNode {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedCoreFunc {
         match alias {
             AliasInfo::CoreInstanceExport { instance_idx, name } => {
                 let (module_idx, func_idx) = component.resolve_core_instance_export(
@@ -587,10 +590,10 @@ impl CoreFuncNode {
     }
 }
 
-impl Resolve for CoreMemoryNode {
+impl<'a> Resolve<'a> for CoreMemoryNode {
     type Root = ResolvedCoreMemory;
 
-    fn resolve(component: &Component, idx: u32) -> Self::Root {
+    fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.core_memories.get(idx) {
             Some(CoreMemoryNode::Aliased(alias)) => Self::follow_alias(component, alias),
             None => panic!("Core memory index {} out of bounds", idx),
@@ -598,8 +601,8 @@ impl Resolve for CoreMemoryNode {
     }
 }
 
-impl CoreMemoryNode {
-    fn follow_alias(component: &Component, alias: &AliasInfo) -> ResolvedCoreMemory {
+impl<'a> CoreMemoryNode {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedCoreMemory {
         match alias {
             AliasInfo::CoreInstanceExport { instance_idx, name } => {
                 let (module_idx, memory_idx) = component.resolve_core_instance_export(
@@ -624,10 +627,10 @@ impl CoreMemoryNode {
     }
 }
 
-impl Resolve for CoreTableNode {
+impl<'a> Resolve<'a> for CoreTableNode {
     type Root = ResolvedCoreTable;
 
-    fn resolve(component: &Component, idx: u32) -> Self::Root {
+    fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.core_tables.get(idx) {
             Some(CoreTableNode::Aliased(alias)) => Self::follow_alias(component, alias),
             None => panic!("Core table index {} out of bounds", idx),
@@ -635,8 +638,8 @@ impl Resolve for CoreTableNode {
     }
 }
 
-impl CoreTableNode {
-    fn follow_alias(component: &Component, alias: &AliasInfo) -> ResolvedCoreTable {
+impl<'a> CoreTableNode {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedCoreTable {
         match alias {
             AliasInfo::CoreInstanceExport { instance_idx, name } => {
                 let (module_idx, table_idx) = component.resolve_core_instance_export(
@@ -661,10 +664,10 @@ impl CoreTableNode {
     }
 }
 
-impl Resolve for CoreGlobalNode {
+impl<'a> Resolve<'a> for CoreGlobalNode {
     type Root = ResolvedCoreGlobal;
 
-    fn resolve(component: &Component, idx: u32) -> Self::Root {
+    fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.core_globals.get(idx) {
             Some(CoreGlobalNode::Aliased(alias)) => Self::follow_alias(component, alias),
             None => panic!("Core global index {} out of bounds", idx),
@@ -672,8 +675,8 @@ impl Resolve for CoreGlobalNode {
     }
 }
 
-impl CoreGlobalNode {
-    fn follow_alias(component: &Component, alias: &AliasInfo) -> ResolvedCoreGlobal {
+impl<'a> CoreGlobalNode {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedCoreGlobal {
         match alias {
             AliasInfo::CoreInstanceExport { instance_idx, name } => {
                 let (module_idx, global_idx) = component.resolve_core_instance_export(
@@ -698,10 +701,10 @@ impl CoreGlobalNode {
     }
 }
 
-impl Resolve for CoreTypeNode {
+impl<'a> Resolve<'a> for CoreTypeNode {
     type Root = ResolvedCoreType;
 
-    fn resolve(component: &Component, idx: u32) -> Self::Root {
+    fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.core_types.get(idx) {
             Some(CoreTypeNode::Defined(def)) => ResolvedCoreType::Defined(def.clone()),
             Some(CoreTypeNode::Aliased(alias)) => Self::follow_alias(component, alias),
@@ -710,8 +713,8 @@ impl Resolve for CoreTypeNode {
     }
 }
 
-impl CoreTypeNode {
-    fn follow_alias(component: &Component, alias: &AliasInfo) -> ResolvedCoreType {
+impl<'a> CoreTypeNode {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedCoreType {
         match alias {
             AliasInfo::Outer { count, index } => {
                 let parent_ref = component.get_parent_component(*count);
@@ -732,14 +735,14 @@ impl CoreTypeNode {
 // Convenience methods on Component
 // =============================================================================
 
-impl Component {
+impl<'a> Component<'a> {
     /// Resolve a module by index.
-    pub fn resolve_module(&self, idx: u32) -> ResolvedModule {
+    pub fn resolve_module(&self, idx: u32) -> ResolvedModule<'a> {
         ModuleNode::resolve(self, idx)
     }
 
     /// Resolve a component by index.
-    pub fn resolve_component(&self, idx: u32) -> ResolvedComponent {
+    pub fn resolve_component(&self, idx: u32) -> ResolvedComponent<'a> {
         ComponentNode::resolve(self, idx)
     }
 

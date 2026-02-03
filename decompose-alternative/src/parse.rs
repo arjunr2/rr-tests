@@ -3,14 +3,14 @@
 use anyhow::{Result, bail};
 use std::cell::RefCell;
 use std::rc::Rc;
-use wasmparser::{
-    ComponentAlias, ComponentExport, ComponentExternalKind, ComponentImport, ComponentInstance,
-    ComponentTypeRef, ExternalKind, Instance, Parser, Payload,
+use wirm::wasmparser::{
+    self, CanonicalOption, ComponentAlias, ComponentExport, ComponentExternalKind, ComponentImport,
+    ComponentInstance, ComponentTypeRef, ExternalKind, Instance, Parser, Payload,
 };
 
 use crate::ir::{
-    AliasInfo, CanonOpt, Component, ComponentFuncNode, ComponentInstanceNode, ComponentNode,
-    ComponentRef, ComponentTypeDef, CoreExportKind, CoreFuncNode, CoreGlobalNode, CoreInlineExport,
+    AliasInfo, Component, ComponentFuncNode, ComponentInstanceNode, ComponentNode, ComponentRef,
+    ComponentTypeDef, CoreExportKind, CoreFuncNode, CoreGlobalNode, CoreInlineExport,
     CoreInstanceNode, CoreInstantiationArg, CoreMemoryNode, CoreTableNode, CoreTypeDef,
     CoreTypeNode, ExportKind, ExportNode, ImportInfo, ImportRef, ImportSpace, InlineExport,
     InstantiationArg, InstantiationArgKind, ModuleNode, ParentScope, TypeNode, ValueNode,
@@ -20,12 +20,15 @@ use crate::ir::{
 ///
 /// Returns a ComponentRef (Rc<RefCell<Component>>) with nested components also wrapped.
 /// Each component stores its parent chain as Weak references for Outer alias resolution.
-pub fn parse_component(bytes: &[u8]) -> Result<ComponentRef> {
+pub fn parse_component<'a>(bytes: &'a [u8]) -> Result<ComponentRef<'a>> {
     parse_component_with_parents(bytes, vec![])
 }
 
 /// Parse a component with an explicit parent chain for Outer alias resolution.
-fn parse_component_with_parents(bytes: &[u8], parents: Vec<ParentScope>) -> Result<ComponentRef> {
+fn parse_component_with_parents<'a>(
+    bytes: &'a [u8],
+    parents: Vec<ParentScope<'a>>,
+) -> Result<ComponentRef<'a>> {
     let parser = Parser::new(0);
 
     // Create the component wrapped in Rc<RefCell> immediately
@@ -44,10 +47,10 @@ fn parse_component_with_parents(bytes: &[u8], parents: Vec<ParentScope>) -> Resu
     Ok(component_ref)
 }
 
-fn handle_payload(
-    component_ref: &ComponentRef,
-    payload: Payload,
-    bytes: &[u8],
+fn handle_payload<'a>(
+    component_ref: &ComponentRef<'a>,
+    payload: Payload<'a>,
+    bytes: &'a [u8],
     depth: &mut u32,
 ) -> Result<()> {
     use Payload::*;
@@ -147,9 +150,9 @@ fn handle_payload(
             *depth += 1;
             // Extract the module bytes from the range
             let module_bytes = &bytes[unchecked_range.start..unchecked_range.end];
-            // Parse the module bytes into Module IR
-            let parsed_module =
-                crate::module::Module::parse(module_bytes).expect("Failed to parse inline module");
+            // Parse the module bytes into wirm Module IR
+            let parsed_module = wirm::Module::parse(module_bytes, false, false)
+                .map_err(|e| anyhow::anyhow!("Failed to parse module: {}", e))?;
             component.modules.push(ModuleNode::Defined {
                 module: parsed_module,
             });
@@ -398,22 +401,8 @@ fn handle_canonical(component: &mut Component, canon: wasmparser::CanonicalFunct
     }
 }
 
-fn parse_canon_options(options: &[wasmparser::CanonicalOption]) -> Vec<CanonOpt> {
-    options
-        .iter()
-        .filter_map(|opt| {
-            use wasmparser::CanonicalOption::*;
-            match opt {
-                UTF8 => Some(CanonOpt::Utf8),
-                UTF16 => Some(CanonOpt::Utf16),
-                CompactUTF16 => Some(CanonOpt::CompactUtf16),
-                Memory(idx) => Some(CanonOpt::Memory(*idx)),
-                Realloc(idx) => Some(CanonOpt::Realloc(*idx)),
-                PostReturn(idx) => Some(CanonOpt::PostReturn(*idx)),
-                _ => None,
-            }
-        })
-        .collect()
+fn parse_canon_options(options: &[wasmparser::CanonicalOption]) -> Vec<CanonicalOption> {
+    options.to_vec()
 }
 
 // =============================================================================
