@@ -5,9 +5,9 @@ use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
 
-use decompose_alternative::ir::ResolvedModule;
-use decompose_alternative::parse_component;
-use decompose_alternative::wasmparser::Validator;
+use component_parser::ir::ResolvedModule;
+use component_parser::parse_component;
+use component_parser::wasmparser::Validator;
 
 #[derive(Parser, Debug)]
 #[command(name = "decompose")]

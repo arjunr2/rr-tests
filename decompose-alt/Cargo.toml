@@ -1,5 +1,5 @@
 [package]
-name = "crimp-decompose"
+name = "decompose-alt"
 edition = "2024"
 authors.workspace = true
 version.workspace = true
@@ -10,6 +10,6 @@ anyhow.workspace = true
 clap.workspace = true
 log.workspace = true
 wasm-crimp.workspace = true
-wirm = {path = "../../wirm" }
-wat = "1.243.0"
-wasmprinter = "0.244.0"
+wirm.workspace = true
+wat.workspace = true
+wasmprinter.workspace = true

@@ -3,8 +3,8 @@ members = [
     "crimp-tests",
     "snapshot",
     "wasi-modules",
-    "crimp-decompose",
-    "decompose-alternative"
+    "component-parser",
+    "decompose-alt"
 ]
 resolver = "3"
 
@@ -24,3 +24,7 @@ log = "0.4.28"
 wasmtime = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["default"] }
 wasmtime-wasi = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["default"] }
 wasm-crimp = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["std"] }
+# For wirm/parsing
+wirm = { path = "../wirm" }
+wasmprinter = "0.244.0"
+wat = "1.244.0"

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use core::panic;
 use env_logger;
@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use std::fs;
 use std::path::PathBuf;
 use wirm::ir::types::CustomSection;
+use wirm::wasmparser::Validator;
 use wirm::{Component, Module};
 
 macro_rules! unsupported {
@@ -17,12 +18,6 @@ macro_rules! unsupported {
     ($cond:expr, $feature:expr) => {
         if $cond {
             panic!("'{}' is not supported yet...", $feature)
-        }
-    };
-    // Three or more arguments: conditional panic with formatted message
-    ($cond:expr, $feature:expr, $($arg:tt)*) => {
-        if $cond {
-            panic!("'{}' is not supported yet: {}", $feature, format!($($arg)*))
         }
     };
 }
@@ -109,6 +104,10 @@ fn main() -> Result<()> {
     env_logger::init();
     let cli = CLI::parse();
     let file = wat::parse_file(&cli.component)?;
+    let mut validator = Validator::new();
+    validator
+        .validate_all(&file)
+        .context("Component validation failed!")?;
     if cli.outdir.exists() {
         fs::remove_dir(&cli.outdir)?;
     }
