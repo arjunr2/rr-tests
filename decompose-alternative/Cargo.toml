@@ -1,0 +1,17 @@
+[package]
+name = "decompose-alternative"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wasmparser = "0.244"
+wasm-encoder = { version = "0.244", features = ["wasmparser"] }
+wasmprinter = "0.244"
+wat = "1.243.0"
+indexmap = "2"
+anyhow.workspace = true
+clap = { version = "4", features = ["derive"] }
+
+[[bin]]
+name = "decompose"
+path = "src/bin/decompose.rs"
