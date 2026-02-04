@@ -12,7 +12,7 @@ use crate::ir::{
     AliasInfo, Component, ComponentFuncNode, ComponentInstanceNode, ComponentNode, ComponentRef,
     ComponentTypeDef, CoreExportKind, CoreFuncNode, CoreGlobalNode, CoreInlineExport,
     CoreInstanceNode, CoreInstantiationArg, CoreMemoryNode, CoreTableNode, CoreTypeDef,
-    CoreTypeNode, ExportKind, ExportNode, ImportInfo, ImportRef, ImportSpace, InlineExport,
+    CoreTypeNode, ExportKind, ExportNode, ImportInfo, InlineExport,
     InstantiationArg, InstantiationArgKind, ModuleNode, ParentScope, TypeNode, ValueNode,
 };
 
@@ -220,48 +220,38 @@ fn handle_payload<'a>(
 // Import Handling
 // =============================================================================
 
-fn handle_component_import(component: &mut Component, import: ComponentImport) {
+fn handle_component_import<'a>(component: &mut Component<'a>, import: ComponentImport<'a>) {
     let info = ImportInfo {
         name: import.name.0.to_string(),
         url: None,
     };
 
-    let (space, index) = match import.ty {
+    // Add to the appropriate index space based on type
+    match import.ty {
         ComponentTypeRef::Module(_) => {
-            let idx = component.modules.len() as u32;
             component.modules.push(ModuleNode::Imported(info));
-            (ImportSpace::Module, idx)
         }
         ComponentTypeRef::Func(_) => {
-            let idx = component.funcs.len() as u32;
             component.funcs.push(ComponentFuncNode::Imported(info));
-            (ImportSpace::Func, idx)
         }
         ComponentTypeRef::Value(_) => {
-            let idx = component.values.len() as u32;
             component.values.push(ValueNode::Imported(info));
-            (ImportSpace::Value, idx)
         }
         ComponentTypeRef::Type(..) => {
-            let idx = component.types.len() as u32;
             component.types.push(TypeNode::Imported(info));
-            (ImportSpace::Type, idx)
         }
         ComponentTypeRef::Instance(_) => {
-            let idx = component.instances.len() as u32;
             component
                 .instances
                 .push(ComponentInstanceNode::Imported(info));
-            (ImportSpace::Instance, idx)
         }
         ComponentTypeRef::Component(_) => {
-            let idx = component.components.len() as u32;
             component.components.push(ComponentNode::Imported(info));
-            (ImportSpace::Component, idx)
         }
     };
 
-    component.imports.push(ImportRef { space, index });
+    // Store the full import (name + type reference)
+    component.imports.push(import);
 }
 
 // =============================================================================

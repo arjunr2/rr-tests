@@ -46,7 +46,6 @@ fn main() -> Result<()> {
     // Extract and write modules
     let component_ref = component.borrow();
     println!("{:?}", component_ref);
-    let mut module_count = 0;
 
     for (idx, _module_node) in component_ref.modules.iter() {
         let resolved = component_ref.resolve_module(idx);
@@ -71,7 +70,6 @@ fn main() -> Result<()> {
                 }
 
                 //println!("Module writing: {:?}", module);
-                module_count += 1;
             }
             ResolvedModule::Imported { name, .. } => {
                 println!("Module {} is imported as '{}', skipping", idx, name);

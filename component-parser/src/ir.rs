@@ -11,6 +11,7 @@ pub use resolve::Resolve;
 use indexmap::IndexMap;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
+use wirm::wasmparser::ComponentImport;
 
 /// Shared reference to a Component (Rc + RefCell for interior mutability).
 pub type ComponentRef<'a> = Rc<RefCell<Component<'a>>>;
@@ -29,24 +30,6 @@ pub enum ParentScope<'a> {
     InstanceType,
 }
 
-/// Which index space an import resides in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImportSpace {
-    Module,
-    Component,
-    Instance,
-    Func,
-    Value,
-    Type,
-}
-
-/// Reference to an imported item: which space it's in and its index within that space.
-#[derive(Debug, Clone)]
-pub struct ImportRef {
-    pub space: ImportSpace,
-    pub index: u32,
-}
-
 /// A parsed WebAssembly Component with all 12 index spaces accessible.
 #[derive(Debug)]
 pub struct Component<'a> {
@@ -54,8 +37,8 @@ pub struct Component<'a> {
     /// Ordered innermost to outermost: parents[0] is the immediate parent.
     pub parents: Vec<ParentScope<'a>>,
 
-    /// All imports in order they appear, with references to their location in index spaces.
-    pub imports: Vec<ImportRef>,
+    /// All imports in order they appear (name + type reference from wasmparser).
+    pub imports: Vec<ComponentImport<'a>>,
 
     // Component-level index spaces
     pub modules: IndexSpace<ModuleNode<'a>>,
