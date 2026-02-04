@@ -6,16 +6,12 @@
 use wirm::Module;
 use wirm::wasmparser::CanonicalOption;
 
+// Re-export wasmparser types we use in our API
+pub use wirm::wasmparser::{ComponentType, ComponentTypeRef};
+
 // =============================================================================
 // Common Info Types
 // =============================================================================
-
-/// Information about an import.
-#[derive(Debug, Clone)]
-pub struct ImportInfo {
-    pub name: String,
-    pub url: Option<String>,
-}
 
 /// Information about an alias.
 #[derive(Debug, Clone)]
@@ -35,7 +31,8 @@ pub enum AliasInfo {
 /// A core WebAssembly module in the module index space.
 #[derive(Debug, Clone)]
 pub enum ModuleNode<'a> {
-    Imported(ImportInfo),
+    /// Imported module - index into component's imports vector
+    Imported(u32),
     Aliased(AliasInfo),
     Defined {
         /// Parsed module IR from wirm
@@ -46,7 +43,8 @@ pub enum ModuleNode<'a> {
 /// A nested component in the component index space.
 #[derive(Debug)]
 pub enum ComponentNode<'a> {
-    Imported(ImportInfo),
+    /// Imported component - index into component's imports vector
+    Imported(u32),
     Aliased(AliasInfo),
     Defined {
         /// Recursively parsed component (Rc<RefCell> for shared access and parent chain setup)
@@ -57,7 +55,7 @@ pub enum ComponentNode<'a> {
 impl<'a> Clone for ComponentNode<'a> {
     fn clone(&self) -> Self {
         match self {
-            Self::Imported(info) => Self::Imported(info.clone()),
+            Self::Imported(idx) => Self::Imported(*idx),
             Self::Aliased(info) => Self::Aliased(info.clone()),
             Self::Defined { component } => Self::Defined {
                 component: component.clone(), // Clones the Rc, not the inner data
@@ -69,7 +67,8 @@ impl<'a> Clone for ComponentNode<'a> {
 /// A component instance in the instance index space.
 #[derive(Debug, Clone)]
 pub enum ComponentInstanceNode {
-    Imported(ImportInfo),
+    /// Imported instance - index into component's imports vector
+    Imported(u32),
     Aliased(AliasInfo),
     /// Created by instantiating a component
     Instantiated {
@@ -114,7 +113,8 @@ pub struct InlineExport {
 /// A component function in the func index space.
 #[derive(Debug, Clone)]
 pub enum ComponentFuncNode {
-    Imported(ImportInfo),
+    /// Imported function - index into component's imports vector
+    Imported(u32),
     Aliased(AliasInfo),
     /// Created by `canon lift`
     Lifted {
@@ -127,27 +127,19 @@ pub enum ComponentFuncNode {
 /// A value in the value index space.
 #[derive(Debug, Clone)]
 pub enum ValueNode {
-    Imported(ImportInfo),
+    /// Imported value - index into component's imports vector
+    Imported(u32),
     Aliased(AliasInfo),
 }
 
 /// A type in the type index space.
 #[derive(Debug, Clone)]
-pub enum TypeNode {
-    /// Component type defined inline
-    Defined(ComponentTypeDef),
+pub enum TypeNode<'a> {
+    /// Component type defined inline (from wasmparser)
+    Defined(ComponentType<'a>),
     Aliased(AliasInfo),
-    Imported(ImportInfo),
-}
-
-#[derive(Debug, Clone)]
-pub enum ComponentTypeDef {
-    // Placeholder - will be expanded based on wasmparser::ComponentType
-    Func,
-    Instance,
-    Component,
-    Defined,
-    Resource,
+    /// Imported type - index into component's imports vector
+    Imported(u32),
 }
 
 // =============================================================================
@@ -262,13 +254,19 @@ pub enum CoreExportKind {
 // Resolved Types (without Aliased variants)
 // =============================================================================
 
+/// A resolved import with name and type reference.
+#[derive(Debug, Clone)]
+pub struct ResolvedImport<'a> {
+    /// The import name
+    pub name: &'a str,
+    /// The type reference (Module, Func, Value, Type, Instance, or Component)
+    pub ty: ComponentTypeRef,
+}
+
 /// Resolved module - either imported or defined inline.
 #[derive(Debug, Clone)]
 pub enum ResolvedModule<'a> {
-    Imported {
-        name: String,
-        url: Option<String>,
-    },
+    Imported(ResolvedImport<'a>),
     /// A defined module with its parsed IR.
     Defined {
         module: Module<'a>,
@@ -278,17 +276,14 @@ pub enum ResolvedModule<'a> {
 /// Resolved component - either imported or defined inline.
 #[derive(Debug)]
 pub enum ResolvedComponent<'a> {
-    Imported { name: String, url: Option<String> },
+    Imported(ResolvedImport<'a>),
     Defined { component: super::ComponentRef<'a> },
 }
 
 impl<'a> Clone for ResolvedComponent<'a> {
     fn clone(&self) -> Self {
         match self {
-            Self::Imported { name, url } => Self::Imported {
-                name: name.clone(),
-                url: url.clone(),
-            },
+            Self::Imported(import) => Self::Imported(import.clone()),
             Self::Defined { component } => Self::Defined {
                 component: component.clone(),
             },
@@ -298,11 +293,8 @@ impl<'a> Clone for ResolvedComponent<'a> {
 
 /// Resolved component instance.
 #[derive(Debug, Clone)]
-pub enum ResolvedInstance {
-    Imported {
-        name: String,
-        url: Option<String>,
-    },
+pub enum ResolvedComponentInstance<'a> {
+    Imported(ResolvedImport<'a>),
     Instantiated {
         component_idx: u32,
         args: Vec<InstantiationArg>,
@@ -312,11 +304,8 @@ pub enum ResolvedInstance {
 
 /// Resolved component function.
 #[derive(Debug, Clone)]
-pub enum ResolvedFunc {
-    Imported {
-        name: String,
-        url: Option<String>,
-    },
+pub enum ResolvedComponentFunc<'a> {
+    Imported(ResolvedImport<'a>),
     Lifted {
         core_func_idx: u32,
         type_idx: u32,
@@ -325,17 +314,13 @@ pub enum ResolvedFunc {
 }
 
 /// Resolved value - only imported (values have no other definition form).
-#[derive(Debug, Clone)]
-pub struct ResolvedValue {
-    pub name: String,
-    pub url: Option<String>,
-}
+pub type ResolvedValue<'a> = ResolvedImport<'a>;
 
 /// Resolved component type.
 #[derive(Debug, Clone)]
-pub enum ResolvedType {
-    Imported { name: String, url: Option<String> },
-    Defined(ComponentTypeDef),
+pub enum ResolvedType<'a> {
+    Imported(ResolvedImport<'a>),
+    Defined(ComponentType<'a>),
 }
 
 /// Resolved core instance.

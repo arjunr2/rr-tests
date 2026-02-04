@@ -46,7 +46,7 @@ pub struct Component<'a> {
     pub instances: IndexSpace<ComponentInstanceNode>,
     pub funcs: IndexSpace<ComponentFuncNode>,
     pub values: IndexSpace<ValueNode>,
-    pub types: IndexSpace<TypeNode>,
+    pub types: IndexSpace<TypeNode<'a>>,
 
     // Core-level index spaces (visible to the component)
     pub core_instances: IndexSpace<CoreInstanceNode>,

@@ -11,10 +11,10 @@
 use super::{
     AliasInfo, Component, ComponentFuncNode, ComponentInstanceNode, ComponentNode, ComponentRef,
     CoreExportKind, CoreFuncNode, CoreGlobalNode, CoreInstanceNode, CoreMemoryNode, CoreTableNode,
-    CoreTypeNode, ExportKind, ModuleNode, ParentScope, ResolvedComponent, ResolvedCoreFunc,
-    ResolvedCoreGlobal, ResolvedCoreInstance, ResolvedCoreMemory, ResolvedCoreTable,
-    ResolvedCoreType, ResolvedFunc, ResolvedInstance, ResolvedModule, ResolvedType, ResolvedValue,
-    TypeNode, ValueNode,
+    CoreTypeNode, ExportKind, ModuleNode, ParentScope, ResolvedComponent, ResolvedComponentFunc,
+    ResolvedComponentInstance, ResolvedCoreFunc, ResolvedCoreGlobal, ResolvedCoreInstance,
+    ResolvedCoreMemory, ResolvedCoreTable, ResolvedCoreType, ResolvedImport, ResolvedModule,
+    ResolvedType, ResolvedValue, TypeNode, ValueNode,
 };
 use wirm::wasmparser::ExternalKind;
 
@@ -37,6 +37,18 @@ pub trait Resolve<'a> {
 // =============================================================================
 
 impl<'a> Component<'a> {
+    /// Look up an import by index and create a ResolvedImport.
+    fn get_resolved_import(&self, import_idx: u32) -> ResolvedImport<'a> {
+        let import = self
+            .imports
+            .get(import_idx as usize)
+            .unwrap_or_else(|| panic!("Import index {} out of bounds", import_idx));
+        ResolvedImport {
+            name: import.name.0,
+            ty: import.ty,
+        }
+    }
+
     /// Get a parent Component by count (1 = immediate parent, 2 = grandparent, etc.)
     /// Panics if the parent doesn't exist or is not a Component.
     fn get_parent_component(&self, count: u32) -> ComponentRef<'a> {
@@ -192,10 +204,10 @@ impl<'a> Component<'a> {
 
                         (module_idx, export.index)
                     }
-                    ModuleNode::Imported(info) => {
+                    ModuleNode::Imported(import_idx) => {
                         panic!(
-                            "Cannot resolve core instance export through imported module '{}' (idx {})",
-                            info.name, module_idx
+                            "Cannot resolve core instance export through imported module (import_idx {}) at module_idx {}",
+                            import_idx, module_idx
                         );
                     }
                     ModuleNode::Aliased(_) => {
@@ -273,10 +285,9 @@ impl<'a> Resolve<'a> for ModuleNode<'a> {
             Some(ModuleNode::Defined { module }) => ResolvedModule::Defined {
                 module: module.clone(),
             },
-            Some(ModuleNode::Imported(info)) => ResolvedModule::Imported {
-                name: info.name.clone(),
-                url: info.url.clone(),
-            },
+            Some(ModuleNode::Imported(import_idx)) => {
+                ResolvedModule::Imported(component.get_resolved_import(*import_idx))
+            }
             Some(ModuleNode::Aliased(alias)) => Self::follow_alias(component, alias),
             None => panic!("Module index {} out of bounds", idx),
         }
@@ -312,10 +323,9 @@ impl<'a> Resolve<'a> for ComponentNode<'a> {
             Some(ComponentNode::Defined { component: nested }) => ResolvedComponent::Defined {
                 component: nested.clone(),
             },
-            Some(ComponentNode::Imported(info)) => ResolvedComponent::Imported {
-                name: info.name.clone(),
-                url: info.url.clone(),
-            },
+            Some(ComponentNode::Imported(import_idx)) => {
+                ResolvedComponent::Imported(component.get_resolved_import(*import_idx))
+            }
             Some(ComponentNode::Aliased(alias)) => Self::follow_alias(component, alias),
             None => panic!("Component index {} out of bounds", idx),
         }
@@ -344,24 +354,23 @@ impl<'a> ComponentNode<'a> {
 }
 
 impl<'a> Resolve<'a> for ComponentInstanceNode {
-    type Root = ResolvedInstance;
+    type Root = ResolvedComponentInstance<'a>;
 
     fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.instances.get(idx) {
             Some(ComponentInstanceNode::Instantiated {
                 component_idx,
                 args,
-            }) => ResolvedInstance::Instantiated {
+            }) => ResolvedComponentInstance::Instantiated {
                 component_idx: *component_idx,
                 args: args.clone(),
             },
             Some(ComponentInstanceNode::FromExports(exports)) => {
-                ResolvedInstance::FromExports(exports.clone())
+                ResolvedComponentInstance::FromExports(exports.clone())
             }
-            Some(ComponentInstanceNode::Imported(info)) => ResolvedInstance::Imported {
-                name: info.name.clone(),
-                url: info.url.clone(),
-            },
+            Some(ComponentInstanceNode::Imported(import_idx)) => {
+                ResolvedComponentInstance::Imported(component.get_resolved_import(*import_idx))
+            }
             Some(ComponentInstanceNode::Aliased(alias)) => Self::follow_alias(component, alias),
             None => panic!("Instance index {} out of bounds", idx),
         }
@@ -369,7 +378,7 @@ impl<'a> Resolve<'a> for ComponentInstanceNode {
 }
 
 impl<'a> ComponentInstanceNode {
-    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedInstance {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedComponentInstance<'a> {
         match alias {
             AliasInfo::InstanceExport { instance_idx, name } => {
                 let (nested_ref, export_idx) =
@@ -390,7 +399,7 @@ impl<'a> ComponentInstanceNode {
 }
 
 impl<'a> Resolve<'a> for ComponentFuncNode {
-    type Root = ResolvedFunc;
+    type Root = ResolvedComponentFunc<'a>;
 
     fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.funcs.get(idx) {
@@ -398,15 +407,14 @@ impl<'a> Resolve<'a> for ComponentFuncNode {
                 core_func_idx,
                 type_idx,
                 options,
-            }) => ResolvedFunc::Lifted {
+            }) => ResolvedComponentFunc::Lifted {
                 core_func_idx: *core_func_idx,
                 type_idx: *type_idx,
                 options: options.clone(),
             },
-            Some(ComponentFuncNode::Imported(info)) => ResolvedFunc::Imported {
-                name: info.name.clone(),
-                url: info.url.clone(),
-            },
+            Some(ComponentFuncNode::Imported(import_idx)) => {
+                ResolvedComponentFunc::Imported(component.get_resolved_import(*import_idx))
+            }
             Some(ComponentFuncNode::Aliased(alias)) => Self::follow_alias(component, alias),
             None => panic!("Func index {} out of bounds", idx),
         }
@@ -414,7 +422,7 @@ impl<'a> Resolve<'a> for ComponentFuncNode {
 }
 
 impl<'a> ComponentFuncNode {
-    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedFunc {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedComponentFunc<'a> {
         match alias {
             AliasInfo::InstanceExport { instance_idx, name } => {
                 let (nested_ref, export_idx) =
@@ -435,14 +443,11 @@ impl<'a> ComponentFuncNode {
 }
 
 impl<'a> Resolve<'a> for ValueNode {
-    type Root = ResolvedValue;
+    type Root = ResolvedValue<'a>;
 
     fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.values.get(idx) {
-            Some(ValueNode::Imported(info)) => ResolvedValue {
-                name: info.name.clone(),
-                url: info.url.clone(),
-            },
+            Some(ValueNode::Imported(import_idx)) => component.get_resolved_import(*import_idx),
             Some(ValueNode::Aliased(alias)) => Self::follow_alias(component, alias),
             None => panic!("Value index {} out of bounds", idx),
         }
@@ -450,7 +455,7 @@ impl<'a> Resolve<'a> for ValueNode {
 }
 
 impl<'a> ValueNode {
-    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedValue {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedValue<'a> {
         match alias {
             AliasInfo::InstanceExport { instance_idx, name } => {
                 let (nested_ref, export_idx) =
@@ -470,24 +475,23 @@ impl<'a> ValueNode {
     }
 }
 
-impl<'a> Resolve<'a> for TypeNode {
-    type Root = ResolvedType;
+impl<'a> Resolve<'a> for TypeNode<'a> {
+    type Root = ResolvedType<'a>;
 
     fn resolve(component: &Component<'a>, idx: u32) -> Self::Root {
         match component.types.get(idx) {
             Some(TypeNode::Defined(def)) => ResolvedType::Defined(def.clone()),
-            Some(TypeNode::Imported(info)) => ResolvedType::Imported {
-                name: info.name.clone(),
-                url: info.url.clone(),
-            },
+            Some(TypeNode::Imported(import_idx)) => {
+                ResolvedType::Imported(component.get_resolved_import(*import_idx))
+            }
             Some(TypeNode::Aliased(alias)) => Self::follow_alias(component, alias),
             None => panic!("Type index {} out of bounds", idx),
         }
     }
 }
 
-impl<'a> TypeNode {
-    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedType {
+impl<'a> TypeNode<'a> {
+    fn follow_alias(component: &Component<'a>, alias: &AliasInfo) -> ResolvedType<'a> {
         match alias {
             AliasInfo::InstanceExport { instance_idx, name } => {
                 let (nested_ref, export_idx) =
@@ -747,22 +751,22 @@ impl<'a> Component<'a> {
     }
 
     /// Resolve a component instance by index.
-    pub fn resolve_instance(&self, idx: u32) -> ResolvedInstance {
+    pub fn resolve_component_instance(&self, idx: u32) -> ResolvedComponentInstance<'a> {
         ComponentInstanceNode::resolve(self, idx)
     }
 
     /// Resolve a component function by index.
-    pub fn resolve_func(&self, idx: u32) -> ResolvedFunc {
+    pub fn resolve_component_func(&self, idx: u32) -> ResolvedComponentFunc<'a> {
         ComponentFuncNode::resolve(self, idx)
     }
 
     /// Resolve a value by index.
-    pub fn resolve_value(&self, idx: u32) -> ResolvedValue {
+    pub fn resolve_value(&self, idx: u32) -> ResolvedValue<'a> {
         ValueNode::resolve(self, idx)
     }
 
     /// Resolve a type by index.
-    pub fn resolve_type(&self, idx: u32) -> ResolvedType {
+    pub fn resolve_type(&self, idx: u32) -> ResolvedType<'a> {
         TypeNode::resolve(self, idx)
     }
 

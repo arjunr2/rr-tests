@@ -10,10 +10,10 @@ use wirm::wasmparser::{
 
 use crate::ir::{
     AliasInfo, Component, ComponentFuncNode, ComponentInstanceNode, ComponentNode, ComponentRef,
-    ComponentTypeDef, CoreExportKind, CoreFuncNode, CoreGlobalNode, CoreInlineExport,
-    CoreInstanceNode, CoreInstantiationArg, CoreMemoryNode, CoreTableNode, CoreTypeDef,
-    CoreTypeNode, ExportKind, ExportNode, ImportInfo, InlineExport,
-    InstantiationArg, InstantiationArgKind, ModuleNode, ParentScope, TypeNode, ValueNode,
+    CoreExportKind, CoreFuncNode, CoreGlobalNode, CoreInlineExport, CoreInstanceNode,
+    CoreInstantiationArg, CoreMemoryNode, CoreTableNode, CoreTypeDef, CoreTypeNode, ExportKind,
+    ExportNode, InlineExport, InstantiationArg, InstantiationArgKind, ModuleNode, ParentScope,
+    TypeNode, ValueNode,
 };
 
 /// Parse a WebAssembly Component from bytes into our IR.
@@ -221,32 +221,34 @@ fn handle_payload<'a>(
 // =============================================================================
 
 fn handle_component_import<'a>(component: &mut Component<'a>, import: ComponentImport<'a>) {
-    let info = ImportInfo {
-        name: import.name.0.to_string(),
-        url: None,
-    };
+    // Get the index this import will have in the imports vector
+    let import_idx = component.imports.len() as u32;
 
     // Add to the appropriate index space based on type
     match import.ty {
         ComponentTypeRef::Module(_) => {
-            component.modules.push(ModuleNode::Imported(info));
+            component.modules.push(ModuleNode::Imported(import_idx));
         }
         ComponentTypeRef::Func(_) => {
-            component.funcs.push(ComponentFuncNode::Imported(info));
+            component
+                .funcs
+                .push(ComponentFuncNode::Imported(import_idx));
         }
         ComponentTypeRef::Value(_) => {
-            component.values.push(ValueNode::Imported(info));
+            component.values.push(ValueNode::Imported(import_idx));
         }
         ComponentTypeRef::Type(..) => {
-            component.types.push(TypeNode::Imported(info));
+            component.types.push(TypeNode::Imported(import_idx));
         }
         ComponentTypeRef::Instance(_) => {
             component
                 .instances
-                .push(ComponentInstanceNode::Imported(info));
+                .push(ComponentInstanceNode::Imported(import_idx));
         }
         ComponentTypeRef::Component(_) => {
-            component.components.push(ComponentNode::Imported(info));
+            component
+                .components
+                .push(ComponentNode::Imported(import_idx));
         }
     };
 
@@ -498,15 +500,7 @@ fn parse_core_instance(instance: Instance) -> CoreInstanceNode {
 // =============================================================================
 
 fn parse_component_type(ty: wasmparser::ComponentType) -> TypeNode {
-    use wasmparser::ComponentType::*;
-    let def = match ty {
-        Defined(_) => ComponentTypeDef::Defined,
-        Func(_) => ComponentTypeDef::Func,
-        Component(_) => ComponentTypeDef::Component,
-        Instance(_) => ComponentTypeDef::Instance,
-        Resource { .. } => ComponentTypeDef::Resource,
-    };
-    TypeNode::Defined(def)
+    TypeNode::Defined(ty)
 }
 
 // =============================================================================

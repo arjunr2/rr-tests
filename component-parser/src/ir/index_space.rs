@@ -31,8 +31,8 @@ impl<T> IndexSpace<T> {
         self.0.get_mut(idx as usize)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (u32, &T)> {
-        self.0.iter().enumerate().map(|(i, t)| (i as u32, t))
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.0.iter()
     }
 
     pub fn len(&self) -> usize {
