@@ -2,6 +2,8 @@
 
 use std::ops::Index;
 
+use crate::{Component, ir::Resolve};
+
 /// A container for items in an index space, supporting O(1) access by index.
 #[derive(Debug, Clone)]
 pub struct IndexSpace<T>(Vec<T>);
@@ -41,6 +43,12 @@ impl<T> IndexSpace<T> {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+impl<'a, T: Resolve<'a>> IndexSpace<T> {
+    pub fn iter_resolved(&self, component: &Component<'a>) -> impl Iterator<Item = T::Root> {
+        self.0.iter().map(|item| item.resolve(component))
     }
 }
 

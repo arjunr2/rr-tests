@@ -9,11 +9,9 @@ use wirm::wasmparser::{
 };
 
 use crate::ir::{
-    AliasInfo, Component, ComponentFuncNode, ComponentInstanceNode, ComponentNode, ComponentRef,
-    CoreExportKind, CoreFuncNode, CoreGlobalNode, CoreInlineExport, CoreInstanceNode,
-    CoreInstantiationArg, CoreMemoryNode, CoreTableNode, CoreTypeDef, CoreTypeNode, ExportKind,
-    ExportNode, InlineExport, InstantiationArg, InstantiationArgKind, ModuleNode, ParentScope,
-    TypeNode, ValueNode,
+    AliasInfo, Component, ComponentExportNode, ComponentFuncNode, ComponentInstanceNode,
+    ComponentNode, ComponentRef, CoreFuncNode, CoreGlobalNode, CoreInstanceNode, CoreMemoryNode,
+    CoreTableNode, CoreTypeNode, ModuleNode, ParentScope, TypeNode, ValueNode,
 };
 
 /// Parse a WebAssembly Component from bytes into our IR.
@@ -194,11 +192,8 @@ fn handle_payload<'a>(
         // =================================================================
         CoreTypeSection(reader) => {
             for ty in reader {
-                let _ty = ty?;
-                // Simplified: just mark as defined
-                component
-                    .core_types
-                    .push(CoreTypeNode::Defined(CoreTypeDef::Func));
+                let ty = ty?;
+                component.core_types.push(CoreTypeNode::Defined(ty));
             }
         }
 
@@ -388,8 +383,15 @@ fn handle_canonical(component: &mut Component, canon: wasmparser::CanonicalFunct
                 options: opts,
             });
         }
+        ResourceDrop { resource } => {
+            component
+                .core_funcs
+                .push(CoreFuncNode::ResourceDrop { resource });
+        }
         // Other canonical functions (resource operations, etc.) - ignore for now
-        _ => {}
+        _ => {
+            panic!("Canonical function variant not supported yet: {:?}", canon);
+        }
     }
 }
 
@@ -402,18 +404,9 @@ fn parse_canon_options(options: &[wasmparser::CanonicalOption]) -> Vec<Canonical
 // =============================================================================
 
 fn handle_component_export(component: &mut Component, export: ComponentExport) {
-    let kind = match export.kind {
-        ComponentExternalKind::Module => ExportKind::Module,
-        ComponentExternalKind::Func => ExportKind::Func,
-        ComponentExternalKind::Value => ExportKind::Value,
-        ComponentExternalKind::Type => ExportKind::Type,
-        ComponentExternalKind::Instance => ExportKind::Instance,
-        ComponentExternalKind::Component => ExportKind::Component,
-    };
-
-    let node = ExportNode {
+    let node = ComponentExportNode {
         name: export.name.0.to_string(),
-        kind,
+        kind: export.kind,
         index: export.index,
         ty: export.ty.map(|t| match t {
             ComponentTypeRef::Module(i) => i,
@@ -432,66 +425,28 @@ fn handle_component_export(component: &mut Component, export: ComponentExport) {
 // Instance Parsing
 // =============================================================================
 
-fn parse_component_instance(instance: ComponentInstance) -> ComponentInstanceNode {
+fn parse_component_instance<'a>(instance: ComponentInstance<'a>) -> ComponentInstanceNode<'a> {
     match instance {
         ComponentInstance::Instantiate {
             component_index,
             args,
-        } => {
-            let args = args
-                .iter()
-                .map(|arg| InstantiationArg {
-                    name: arg.name.to_string(),
-                    kind: convert_component_arg_kind(arg.kind),
-                    index: arg.index,
-                })
-                .collect();
-            ComponentInstanceNode::Instantiated {
-                component_idx: component_index,
-                args,
-            }
-        }
+        } => ComponentInstanceNode::Instantiated {
+            component_idx: component_index,
+            args: args.into_vec(),
+        },
         ComponentInstance::FromExports(exports) => {
-            let exports = exports
-                .iter()
-                .map(|e| InlineExport {
-                    name: e.name.0.to_string(),
-                    kind: convert_export_kind(e.kind),
-                    index: e.index,
-                })
-                .collect();
-            ComponentInstanceNode::FromExports(exports)
+            ComponentInstanceNode::FromExports(exports.into_vec())
         }
     }
 }
 
-fn parse_core_instance(instance: Instance) -> CoreInstanceNode {
+fn parse_core_instance<'a>(instance: Instance<'a>) -> CoreInstanceNode<'a> {
     match instance {
-        Instance::Instantiate { module_index, args } => {
-            let args = args
-                .iter()
-                .map(|arg| CoreInstantiationArg {
-                    name: arg.name.to_string(),
-                    kind: convert_core_arg_kind(arg.kind),
-                    index: arg.index,
-                })
-                .collect();
-            CoreInstanceNode::Instantiated {
-                module_idx: module_index,
-                args,
-            }
-        }
-        Instance::FromExports(exports) => {
-            let exports = exports
-                .iter()
-                .map(|e| CoreInlineExport {
-                    name: e.name.to_string(),
-                    kind: convert_core_export_kind(e.kind),
-                    index: e.index,
-                })
-                .collect();
-            CoreInstanceNode::FromExports(exports)
-        }
+        Instance::Instantiate { module_index, args } => CoreInstanceNode::Instantiated {
+            module_idx: module_index,
+            args: args.into_vec(),
+        },
+        Instance::FromExports(exports) => CoreInstanceNode::FromExports(exports.into_vec()),
     }
 }
 
@@ -501,48 +456,4 @@ fn parse_core_instance(instance: Instance) -> CoreInstanceNode {
 
 fn parse_component_type(ty: wasmparser::ComponentType) -> TypeNode {
     TypeNode::Defined(ty)
-}
-
-// =============================================================================
-// Kind Conversions
-// =============================================================================
-
-fn convert_component_arg_kind(kind: wasmparser::ComponentExternalKind) -> InstantiationArgKind {
-    match kind {
-        wasmparser::ComponentExternalKind::Module => InstantiationArgKind::Module,
-        wasmparser::ComponentExternalKind::Func => InstantiationArgKind::Func,
-        wasmparser::ComponentExternalKind::Value => InstantiationArgKind::Value,
-        wasmparser::ComponentExternalKind::Type => InstantiationArgKind::Type,
-        wasmparser::ComponentExternalKind::Instance => InstantiationArgKind::Instance,
-        wasmparser::ComponentExternalKind::Component => InstantiationArgKind::Component,
-    }
-}
-
-fn convert_export_kind(kind: wasmparser::ComponentExternalKind) -> ExportKind {
-    match kind {
-        wasmparser::ComponentExternalKind::Module => ExportKind::Module,
-        wasmparser::ComponentExternalKind::Func => ExportKind::Func,
-        wasmparser::ComponentExternalKind::Value => ExportKind::Value,
-        wasmparser::ComponentExternalKind::Type => ExportKind::Type,
-        wasmparser::ComponentExternalKind::Instance => ExportKind::Instance,
-        wasmparser::ComponentExternalKind::Component => ExportKind::Component,
-    }
-}
-
-fn convert_core_arg_kind(kind: wasmparser::InstantiationArgKind) -> CoreExportKind {
-    match kind {
-        wasmparser::InstantiationArgKind::Instance => CoreExportKind::Func, // Simplified
-    }
-}
-
-fn convert_core_export_kind(kind: wasmparser::ExternalKind) -> CoreExportKind {
-    match kind {
-        wasmparser::ExternalKind::Func | wasmparser::ExternalKind::FuncExact => {
-            CoreExportKind::Func
-        }
-        wasmparser::ExternalKind::Table => CoreExportKind::Table,
-        wasmparser::ExternalKind::Memory => CoreExportKind::Memory,
-        wasmparser::ExternalKind::Global => CoreExportKind::Global,
-        wasmparser::ExternalKind::Tag => CoreExportKind::Tag,
-    }
 }

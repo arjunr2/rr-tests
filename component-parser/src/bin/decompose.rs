@@ -2,15 +2,25 @@
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
-use std::cell::Ref;
+use env_logger;
+use std::borrow::Cow;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::rc::Rc;
+use wirm::wasmparser::{ExternalKind, InstantiationArgKind};
 
 use component_parser::Component;
-use component_parser::ir::{ComponentInstanceNode, ResolvedModule};
+use component_parser::ir::{
+    CoreInstanceNode, Export, Resolve, ResolvedComponentInstance, ResolvedCoreFunc,
+    ResolvedCoreInstance, ResolvedModule,
+};
 use component_parser::parse_component;
 use component_parser::wasmparser::Validator;
 use component_parser::wirm::Module;
+use component_parser::wirm::ir::id::ImportsID;
+use component_parser::wirm::ir::types::CustomSection;
 
 macro_rules! unsupported {
     // Single argument: unconditional error
@@ -45,34 +55,182 @@ struct CLI {
     outdir: PathBuf,
 }
 
+struct ModuleImportMetadata<'a> {
+    pub module: Module<'a>,
+    pub import_map: HashMap<String, HashMap<String, ImportsID>>,
+}
+
+#[derive(Debug)]
+struct ImportRenames<'a> {
+    /// Renames for packages imported by this module with the module (id: u32) providing the export
+    pub packages: HashMap<ImportsID, u32>,
+    /// Renames for the members imported by this module at idx (u32) with the member name
+    /// in the module providing the export
+    pub members: HashMap<ImportsID, &'a str>,
+    /// The IDs for the imports in this module that are true imports (not linked into from sister modules)
+    pub true_imports: Vec<ImportsID>,
+}
+
+/// Metadata needed to capture the linking information for a module for CRIMP replay custom section
+#[derive(Debug)]
+struct ModuleLinkingMetadata<'a> {
+    /// The core Wasm module extracted for linked
+    module: &'a Module<'a>,
+    /// The ID for this module within the component
+    module_id: u32,
+    /// The order in which this module should be instantiated w.r.t other modules
+    instantiate_order: u32,
+    /// The import renames needed for this module to be correctly linked to sister modules
+    import_renames: ImportRenames<'a>,
+}
+
 /// Decomposed representation of a component into its constituent modules with linking metadata
 #[derive(Default)]
 struct ComponentDecomposed<'a> {
     modules: Vec<Module<'a>>,
 }
 
-impl<'a> ComponentDecomposed<'a> {
-    fn validate_assumptions(component: Ref<'a, Component<'a>>) -> Result<()> {
-        // Currently no assumptions to assert
-        unsupported!(
-            component.components.is_empty(),
-            "Component has nested components"
-        )?;
+/// Validate assumptions about the component that must hold for decomposition to be valid
+///
+/// Relax these as we build out this tool. Currently, we stop the following:
+/// * Main component instances
+/// * Nested components
+///
+/// Note: Imports can still use things like component, module. We are not testing for
+/// full recursive enforcement of these assumptions.
+fn validate_assumptions<'a>(component: &Component<'a>) -> Result<()> {
+    unsupported!(!component.components.is_empty(), "Nested components")?;
 
-        for x in component.instances.iter() {
-            let y = ComponentInstanceNode::resolve(component, x);
-            match x {
-                ComponentInstanceNode::Imported(_) => {}
-                _ 
+    for inst in component.instances.iter_resolved(component) {
+        match inst {
+            ResolvedComponentInstance::Imported(_) => {}
+            _ => {
+                unsupported!("Main, inline component instances")?;
             }
         }
-        //unsupported!(
-        //    !self.component_instances.is_empty(),
-        //    "Main component instances"
-        //);
-        Ok(())
     }
 
+    Ok(())
+}
+
+/// Construct the [`ModuleLinkingMetadata`] for the component
+fn linking_metadata<'a>(
+    component: &'a Component,
+) -> Result<Option<Vec<ModuleLinkingMetadata<'a>>>> {
+    let mut export_core_instances = HashMap::<u32, Vec<Export>>::new();
+    let mut mm_map = HashMap::<u32, ModuleImportMetadata>::new();
+    // Only needs to handle core instances for now
+    for (instance_id, instance) in component.core_instances.iter().enumerate() {
+        if let CoreInstanceNode::Aliased(alias) = instance {
+            unsupported!(format!("Aliased core instance: {:?}", alias))?;
+        }
+        match instance.resolve(&component) {
+            ResolvedCoreInstance::FromExports(exports) => {
+                export_core_instances.insert(instance_id as u32, exports);
+            }
+            ResolvedCoreInstance::Instantiated { module_idx, args } => {
+                if mm_map.contains_key(&module_idx) {
+                    unsupported!(format!(
+                        "Multiple instantiations of core module: {}",
+                        module_idx
+                    ))?;
+                } else {
+                    // Populate import map for the module being instantiated
+                    let module = component.resolve_module(module_idx).defined();
+                    let mut import_map: HashMap<String, HashMap<String, ImportsID>> =
+                        HashMap::new();
+                    for (i, import) in module.imports.iter().enumerate() {
+                        let members = import_map
+                            .entry(import.module.as_ref().to_owned())
+                            .or_default();
+                        members.insert(import.name.to_string(), ImportsID(i as u32));
+                    }
+                    mm_map.insert(module_idx, ModuleImportMetadata { module, import_map });
+                }
+
+                // Gather linking information from args
+                let mut expected_imports = mm_map
+                    .get(&module_idx)
+                    .expect("Module should be already defined")
+                    .import_map
+                    .clone();
+                assert_eq!(args.len(), expected_imports.len());
+                log::trace!("Linking {:?} args to {:?} imports", args, expected_imports);
+                for arg in args {
+                    // Ensure no new kinds of instantiation args are introduced
+                    match arg.kind {
+                        InstantiationArgKind::Instance => {}
+                    };
+                    // Get imports for 'arg.name' package
+                    let mut member_imports = expected_imports
+                        .remove(arg.name)
+                        .expect("import should be populated");
+                    // Get the export for instance providing 'arg.name' package
+                    let instance_exports = export_core_instances
+                        .get(&arg.index)
+                        .expect("exported core instance should be already populated");
+                    for export in instance_exports.iter() {
+                        //get_export_in_core_instance(export, &member_imports)?;
+                        let core_import_idx = member_imports
+                            .remove(&export.name.to_string())
+                            .expect("export should be matched by an import");
+                        match export.kind {
+                            ExternalKind::Func => {
+                                let core_func = component.resolve_core_func(export.index);
+                                match core_func {
+                                    ResolvedCoreFunc::Lowered { func_idx, options } => {
+                                        let comp_func = component.resolve_component_func(func_idx);
+                                        log::debug!(
+                                            "CoreFunc[{:?}] lowered from ComponentFunc[{:?}] with options {:?}",
+                                            export.index,
+                                            comp_func,
+                                            options
+                                        );
+                                    }
+                                    ResolvedCoreFunc::FromModule {
+                                        module_idx,
+                                        func_idx,
+                                    } => {
+                                        log::debug!(
+                                            "CoreFunc[{:?}] from module {:?} func idx {:?}",
+                                            export.index,
+                                            module_idx,
+                                            func_idx
+                                        );
+                                    }
+                                    ResolvedCoreFunc::ResourceDrop { .. } => {
+                                        log::debug!(
+                                            "CoreFunc[{:?}] is a resource drop",
+                                            export.index,
+                                        );
+                                    }
+                                }
+                            }
+                            ExternalKind::Table => {
+                                let t = component.resolve_core_table(export.index);
+                                log::debug!("CoreTable resolved to {:?}", t);
+                            }
+                            ExternalKind::Memory => {
+                                let m = component.resolve_core_memory(export.index);
+                                log::debug!("CoreMemory resolved to {:?}", m);
+                            }
+                            _ => {
+                                unsupported!(format!("Linking of export kind {:?}", export.kind))?;
+                            }
+                        }
+                    }
+                    assert!(
+                        member_imports.is_empty(),
+                        "All imports should be matched by exports"
+                    );
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+impl<'a> ComponentDecomposed<'a> {
     /// Validate all modules in the decomposed representation.
     fn validate_modules(&self) -> Result<()> {
         for module in &self.modules {
@@ -84,43 +242,57 @@ impl<'a> ComponentDecomposed<'a> {
     }
 
     /// Produce a [ComponentDecomposed] from a [Component]
-    fn from_component(component: Ref<'a, Component<'a>>) -> Result<Self> {
-        Self::validate_assumptions(component)?;
+    fn from_component(component_rc: Rc<RefCell<Component<'a>>>) -> Result<Self> {
+        let component = component_rc.borrow();
+        validate_assumptions(&component)?;
 
-        let mut metadata = CrimpReplayMetadata::default();
-
+        let mut mlist = Vec::<Module<'a>>::new();
         // Populate the modules that the component will be decomposed into
-        for (i, mut module) in accessor.module_list().into_iter().enumerate() {
-            if module.module_name.is_none() {
-                // Assign a default name if none exists
-                module.module_name = Some(format!("module_{}", i));
+        for (i, module) in component.modules.iter_resolved(&component).enumerate() {
+            match module {
+                ResolvedModule::Imported { .. } => {
+                    unsupported!("Imported modules")?;
+                }
+                ResolvedModule::Defined { module } => {
+                    let mut module = module.clone();
+                    if module.module_name.is_none() {
+                        // Assign a default name if none exists
+                        module.module_name = Some(format!("module_{}", i));
+                    }
+                    let _cid = module.custom_sections.add(CustomSection {
+                        name: "crimp-replay",
+                        data: Cow::from(b""),
+                    });
+                    mlist.push(module);
+                }
             }
-            let _cid = module.custom_sections.add(CustomSection {
-                name: "crimp-replay",
-                data: Cow::from(b""),
-            });
-            metadata.modules.push(module);
         }
 
-        accessor.instantiate_commands()?;
+        let metadata = linking_metadata(&component)?;
+        //accessor.instantiate_commands()?;
 
-        Ok(ComponentDecomposed {
-            modules: metadata.modules,
-        })
+        let decomposed = ComponentDecomposed { modules: mlist };
+        decomposed.validate_modules()?;
+        Ok(decomposed)
     }
 
     fn dump_to_files(self, wat: bool, outdir: &PathBuf) -> Result<()> {
-        for mut module in self.modules {
+        for module in self.modules {
             let bytes = if wat {
                 wasmprinter::print_bytes(module.encode())?.into_bytes()
             } else {
                 module.encode()
             };
-            let mut module_path =
-                outdir.join(module.module_name.clone().expect(MODULE_NAME_ERR_MSG));
+            let mut module_path = outdir.join(
+                module
+                    .module_name
+                    .clone()
+                    .expect("The module name should always be set for decomposed modules"),
+            );
             if !module_path.add_extension(if wat { "wat" } else { "wasm" }) {
                 panic!("Failed to add extension to module path: {:?}", module_path);
             }
+            log::info!("Writing module: {:?}", module_path);
             fs::write(module_path, bytes)?;
         }
         Ok(())
@@ -128,6 +300,7 @@ impl<'a> ComponentDecomposed<'a> {
 }
 
 fn main() -> Result<()> {
+    env_logger::init();
     let cli = CLI::parse();
     let file = wat::parse_file(&cli.component)?;
 
@@ -137,48 +310,13 @@ fn main() -> Result<()> {
         .with_context(|| "Validation failed")?;
 
     let component_rc = parse_component(&file).with_context(|| "Failed to parse component")?;
-    let component = component_rc.borrow();
-    println!("{:?}", component);
 
     if cli.outdir.exists() {
         fs::remove_dir(&cli.outdir)?;
     }
     fs::create_dir(&cli.outdir)?;
 
-    let decomposed = ComponentDecomposed::from_component(component)?;
+    let decomposed = ComponentDecomposed::from_component(component_rc)?;
     decomposed.dump_to_files(cli.wat, &cli.outdir)?;
     Ok(())
-
-    //for (idx, _module_node) in component_ref.modules.iter() {
-    //    let resolved = component_ref.resolve_module(idx);
-    //    match resolved {
-    //        ResolvedModule::Defined { mut module } => {
-    //            // Re-encode the module from the parsed IR
-    //            let encoded_bytes = module.encode();
-
-    //            let filename = if cli.wat {
-    //                format!("module_{}.wat", idx)
-    //            } else {
-    //                format!("module_{}.wasm", idx)
-    //            };
-    //            let output_path = cli.outdir.join(&filename);
-
-    //            if cli.wat {
-    //                // Convert to WAT format
-    //                let wat_string = wasmprinter::print_bytes(&encoded_bytes)?;
-    //                fs::write(&output_path, wat_string)?;
-    //            } else {
-    //                fs::write(&output_path, &encoded_bytes)?;
-    //            }
-
-    //            //println!("Module writing: {:?}", module);
-    //        }
-    //        ResolvedModule::Imported(resolved_import) => {
-    //            println!(
-    //                "Module {} is imported as '{}', skipping",
-    //                idx, resolved_import.name
-    //            );
-    //        }
-    //    }
-    //}
 }

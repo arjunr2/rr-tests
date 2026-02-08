@@ -4,10 +4,12 @@
 //! in that index space can be introduced (Import, Alias, Definition, etc.)
 
 use wirm::Module;
-use wirm::wasmparser::CanonicalOption;
 
 // Re-export wasmparser types we use in our API
-pub use wirm::wasmparser::{ComponentType, ComponentTypeRef};
+pub use wirm::wasmparser::{
+    CanonicalOption, ComponentExport, ComponentExternalKind, ComponentInstantiationArg,
+    ComponentType, ComponentTypeRef, CoreType, Export, ExternalKind, InstantiationArg,
+};
 
 // =============================================================================
 // Common Info Types
@@ -41,7 +43,7 @@ pub enum ModuleNode<'a> {
 }
 
 /// A nested component in the component index space.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ComponentNode<'a> {
     /// Imported component - index into component's imports vector
     Imported(u32),
@@ -52,62 +54,31 @@ pub enum ComponentNode<'a> {
     },
 }
 
-impl<'a> Clone for ComponentNode<'a> {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Imported(idx) => Self::Imported(*idx),
-            Self::Aliased(info) => Self::Aliased(info.clone()),
-            Self::Defined { component } => Self::Defined {
-                component: component.clone(), // Clones the Rc, not the inner data
-            },
-        }
-    }
-}
+//impl<'a> Clone for ComponentNode<'a> {
+//    fn clone(&self) -> Self {
+//        match self {
+//            Self::Imported(idx) => Self::Imported(*idx),
+//            Self::Aliased(info) => Self::Aliased(info.clone()),
+//            Self::Defined { component } => Self::Defined {
+//                component: component.clone(), // Clones the Rc, not the inner data
+//            },
+//        }
+//    }
+//}
 
 /// A component instance in the instance index space.
 #[derive(Debug, Clone)]
-pub enum ComponentInstanceNode {
+pub enum ComponentInstanceNode<'a> {
     /// Imported instance - index into component's imports vector
     Imported(u32),
     Aliased(AliasInfo),
     /// Created by instantiating a component
     Instantiated {
         component_idx: u32,
-        args: Vec<InstantiationArg>,
+        args: Vec<ComponentInstantiationArg<'a>>,
     },
     /// Created inline from a list of exports
-    FromExports(Vec<InlineExport>),
-}
-
-#[derive(Debug, Clone)]
-pub struct InstantiationArg {
-    pub name: String,
-    pub kind: InstantiationArgKind,
-    pub index: u32,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum InstantiationArgKind {
-    Module,
-    Component,
-    Instance,
-    Func,
-    Value,
-    Type,
-    // Core kinds
-    CoreModule,
-    CoreInstance,
-    CoreFunc,
-    CoreMemory,
-    CoreTable,
-    CoreGlobal,
-}
-
-#[derive(Debug, Clone)]
-pub struct InlineExport {
-    pub name: String,
-    pub kind: ExportKind,
-    pub index: u32,
+    FromExports(Vec<ComponentExport<'a>>),
 }
 
 /// A component function in the func index space.
@@ -148,29 +119,15 @@ pub enum TypeNode<'a> {
 
 /// A core instance in the core instance index space.
 #[derive(Debug, Clone)]
-pub enum CoreInstanceNode {
+pub enum CoreInstanceNode<'a> {
     Aliased(AliasInfo),
     /// Created by instantiating a module
     Instantiated {
         module_idx: u32,
-        args: Vec<CoreInstantiationArg>,
+        args: Vec<InstantiationArg<'a>>,
     },
     /// Created inline from exports
-    FromExports(Vec<CoreInlineExport>),
-}
-
-#[derive(Debug, Clone)]
-pub struct CoreInstantiationArg {
-    pub name: String,
-    pub kind: CoreExportKind,
-    pub index: u32,
-}
-
-#[derive(Debug, Clone)]
-pub struct CoreInlineExport {
-    pub name: String,
-    pub kind: CoreExportKind,
-    pub index: u32,
+    FromExports(Vec<Export<'a>>),
 }
 
 /// A core function in the core func index space.
@@ -181,6 +138,10 @@ pub enum CoreFuncNode {
     Lowered {
         func_idx: u32,
         options: Vec<CanonicalOption>,
+    },
+    /// Created by `canon resource.drop`
+    ResourceDrop {
+        resource: u32,
     },
 }
 
@@ -204,17 +165,10 @@ pub enum CoreGlobalNode {
 
 /// A core type in the core type index space.
 #[derive(Debug, Clone)]
-pub enum CoreTypeNode {
+pub enum CoreTypeNode<'a> {
     Aliased(AliasInfo),
-    /// Defined inline (function signature, etc.)
-    Defined(CoreTypeDef),
-}
-
-#[derive(Debug, Clone)]
-pub enum CoreTypeDef {
-    // Placeholder - will be expanded
-    Func,
-    Module,
+    /// Defined inline (from wasmparser)
+    Defined(CoreType<'a>),
 }
 
 // =============================================================================
@@ -223,31 +177,12 @@ pub enum CoreTypeDef {
 
 /// An export from this component.
 #[derive(Debug, Clone)]
-pub struct ExportNode {
+pub struct ComponentExportNode {
     pub name: String,
-    pub kind: ExportKind,
+    pub kind: ComponentExternalKind,
     pub index: u32,
     /// Optional type ascription
     pub ty: Option<u32>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExportKind {
-    Module,
-    Component,
-    Instance,
-    Func,
-    Value,
-    Type,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CoreExportKind {
-    Func,
-    Table,
-    Memory,
-    Global,
-    Tag,
 }
 
 // =============================================================================
@@ -256,11 +191,16 @@ pub enum CoreExportKind {
 
 /// A resolved import with name and type reference.
 #[derive(Debug, Clone)]
-pub struct ResolvedImport<'a> {
-    /// The import name
-    pub name: &'a str,
-    /// The type reference (Module, Func, Value, Type, Instance, or Component)
-    pub ty: ComponentTypeRef,
+pub enum ResolvedImport<'a> {
+    /// This import type is direct defined in the space it was resolved
+    Direct {
+        /// The import name
+        name: &'a str,
+        /// The type reference (Module, Func, Value, Type, Instance, or Component)
+        ty: ComponentTypeRef,
+    },
+    /// This type is within another type (e.g. within an instance type or a component type)
+    Indirect,
 }
 
 /// Resolved module - either imported or defined inline.
@@ -271,6 +211,15 @@ pub enum ResolvedModule<'a> {
     Defined {
         module: Module<'a>,
     },
+}
+
+impl<'a> ResolvedModule<'a> {
+    pub fn defined(self) -> Module<'a> {
+        match self {
+            Self::Imported(_) => panic!("Expected defined module, found imported"),
+            Self::Defined { module } => module,
+        }
+    }
 }
 
 /// Resolved component - either imported or defined inline.
@@ -297,9 +246,9 @@ pub enum ResolvedComponentInstance<'a> {
     Imported(ResolvedImport<'a>),
     Instantiated {
         component_idx: u32,
-        args: Vec<InstantiationArg>,
+        args: Vec<ComponentInstantiationArg<'a>>,
     },
-    FromExports(Vec<InlineExport>),
+    FromExports(Vec<ComponentExport<'a>>),
 }
 
 /// Resolved component function.
@@ -325,12 +274,12 @@ pub enum ResolvedType<'a> {
 
 /// Resolved core instance.
 #[derive(Debug, Clone)]
-pub enum ResolvedCoreInstance {
+pub enum ResolvedCoreInstance<'a> {
     Instantiated {
         module_idx: u32,
-        args: Vec<CoreInstantiationArg>,
+        args: Vec<InstantiationArg<'a>>,
     },
-    FromExports(Vec<CoreInlineExport>),
+    FromExports(Vec<Export<'a>>),
 }
 
 /// Resolved core function - either lowered or from a module.
@@ -341,6 +290,8 @@ pub enum ResolvedCoreFunc {
         func_idx: u32,
         options: Vec<CanonicalOption>,
     },
+    /// Created by `canon resource.drop`
+    ResourceDrop { resource: u32 },
     /// From a module's export (traced through core instance)
     FromModule { module_idx: u32, func_idx: u32 },
 }
@@ -368,6 +319,6 @@ pub struct ResolvedCoreGlobal {
 
 /// Resolved core type.
 #[derive(Debug, Clone)]
-pub enum ResolvedCoreType {
-    Defined(CoreTypeDef),
+pub enum ResolvedCoreType<'a> {
+    Defined(CoreType<'a>),
 }

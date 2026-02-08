@@ -43,21 +43,21 @@ pub struct Component<'a> {
     // Component-level index spaces
     pub modules: IndexSpace<ModuleNode<'a>>,
     pub components: IndexSpace<ComponentNode<'a>>,
-    pub instances: IndexSpace<ComponentInstanceNode>,
+    pub instances: IndexSpace<ComponentInstanceNode<'a>>,
     pub funcs: IndexSpace<ComponentFuncNode>,
     pub values: IndexSpace<ValueNode>,
     pub types: IndexSpace<TypeNode<'a>>,
 
     // Core-level index spaces (visible to the component)
-    pub core_instances: IndexSpace<CoreInstanceNode>,
+    pub core_instances: IndexSpace<CoreInstanceNode<'a>>,
     pub core_funcs: IndexSpace<CoreFuncNode>,
     pub core_memories: IndexSpace<CoreMemoryNode>,
     pub core_tables: IndexSpace<CoreTableNode>,
     pub core_globals: IndexSpace<CoreGlobalNode>,
-    pub core_types: IndexSpace<CoreTypeNode>,
+    pub core_types: IndexSpace<CoreTypeNode<'a>>,
 
     // Exports (name -> what is exported)
-    pub exports: IndexMap<String, ExportNode>,
+    pub exports: IndexMap<String, ComponentExportNode>,
 }
 
 impl<'a> Default for Component<'a> {
