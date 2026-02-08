@@ -157,10 +157,7 @@ impl<'a> Component<'a> {
                 );
             }
             ComponentInstanceNode::Imported(_) => {
-                log::warn!(
-                    "Resolving InstanceExport alias through imported instance {}",
-                    instance_idx
-                );
+                // The instance is imported, so we cannot resolve the export to a defined field.
                 ResolvedAliasExportComponentInstance::Imported
             }
             ComponentInstanceNode::Aliased(_) => {
