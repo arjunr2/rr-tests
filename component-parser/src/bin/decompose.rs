@@ -10,8 +10,7 @@ use std::fs;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::rc::Rc;
-use wirm::ir::id::FunctionID;
-use wirm::wasmparser::{CanonicalOption, ExternalKind, InstantiationArg, InstantiationArgKind};
+use wirm::wasmparser::{CanonicalOption, ExternalKind, InstantiationArgKind};
 
 use component_parser::Component;
 use component_parser::ir::{
@@ -78,16 +77,88 @@ impl Deref for ModuleLinkID {
 }
 
 type InstantiateOrder = u32;
+/// Index type into a (module, export_name)
+#[derive(Debug, Clone)]
+struct ModuleExport(ModuleLinkID, String);
 
+/// The export index as assigned by the recorder in RR.
+#[derive(Debug, Clone)]
+struct RecordExportIndex(u32);
+
+/// Index for canonical options adapters within a module's IR.
 #[derive(Debug, Default)]
-struct ImportRenames {
+struct CanonicalOptionsIndex {
+    memory: Option<ModuleExport>,
+    realloc: Option<ModuleExport>,
+    post_return: Option<ModuleExport>,
+}
+
+impl CanonicalOptionsIndex {
+    /// Indexes the options for a canonical function within the module's IR
+    fn from_options<'a>(component: &Component<'a>, options: &[CanonicalOption]) -> Option<Self> {
+        fn func_resolve<'a>(component: &Component<'a>, func_idx: u32) -> ModuleExport {
+            match component.resolve_core_func(func_idx) {
+                ResolvedCoreFunc::FromModule {
+                    module_idx,
+                    func_idx,
+                } => {
+                    let module_link_id = ModuleLinkID(module_idx);
+                    let export_name = get_export_name_from_kind_idx(
+                        component,
+                        module_idx,
+                        vec![ExternalKind::Func, ExternalKind::FuncExact],
+                        func_idx,
+                    );
+                    ModuleExport(module_link_id, export_name)
+                }
+                _ => panic!("Canonical options core references can only come FromModule"),
+            }
+        }
+
+        let mut opts_ref = CanonicalOptionsIndex::default();
+        for opt in options {
+            match opt {
+                //CanonicalOption::Memory(memory_idx) => opts_ref.memory = Some(name.clone()),
+                CanonicalOption::Realloc(func_idx) => {
+                    opts_ref.realloc = Some(func_resolve(component, *func_idx));
+                }
+                CanonicalOption::PostReturn(func_idx) => {
+                    opts_ref.post_return = Some(func_resolve(component, *func_idx));
+                }
+                CanonicalOption::Memory(memory_idx) => {
+                    opts_ref.memory = Some(ModuleExport(
+                        ModuleLinkID(*memory_idx),
+                        get_export_name_from_kind_idx(
+                            component,
+                            *memory_idx,
+                            vec![ExternalKind::Memory],
+                            *memory_idx,
+                        ),
+                    ));
+                }
+                CanonicalOption::UTF8 | CanonicalOption::UTF16 => {
+                    // These options are implicitly capturing in recording, so do nothing
+                }
+                _ => panic!("Canonical option variant not supported yet: {:?}", opt),
+            }
+        }
+        (!options.is_empty()).then_some(opts_ref)
+    }
+}
+
+/// Metadata capturing all the import linking information for a module instantiation
+///
+/// For a given instance, every import ID in the module must fall into at least
+/// one of these fields.
+#[derive(Debug, Default)]
+struct ImportMetadata {
     /// Renames for import packages with the module name
-    pub packages: HashMap<ImportsID, ModuleLinkID>,
+    pub package_renames: HashMap<ImportsID, ModuleLinkID>,
     /// Renames for import members with the member name
-    pub members: HashMap<ImportsID, String>,
+    pub member_renames: HashMap<ImportsID, String>,
     /// The IDs for the imports in this module that are true imports (not linked into from sister modules)
     /// with optional canonical options if they are canonical lowers.
-    pub true_imports: HashMap<ImportsID, Option<Vec<CanonicalOption>>>,
+    pub true_imports: HashMap<ImportsID, Option<CanonicalOptionsIndex>>,
     /// The IDs for the imports in this module that are builtins (e.g. from canonical options)
     pub builtins: HashSet<ImportsID>,
 }
@@ -99,8 +170,15 @@ struct InstanceLinkingMetadata {
     module_link_id: ModuleLinkID,
     /// The order in which this module should be instantiated w.r.t other modules
     instantiate_order: InstantiateOrder,
-    /// The import renames needed for this module to be correctly linked to sister modules
-    import_renames: ImportRenames,
+    /// The import metadata needed for this module to be correctly linked to sister modules
+    import_md: ImportMetadata,
+}
+
+#[derive(Debug)]
+/// Metadata to identify core functions being exported.
+struct ExportFuncMetadata {
+    index: ModuleExport,
+    opts: CanonicalOptionsIndex,
 }
 
 /// Metadata needed to capture complete linking information for a component for CRIMP replay custom section
@@ -110,6 +188,8 @@ struct LinkingMetadata<'a> {
     mm: HashMap<ModuleLinkID, ModuleMetadata<'a>>,
     /// The linking information for each instantiated module
     instances: Vec<InstanceLinkingMetadata>,
+    /// The exported functions from this component. Each
+    export_funcs: HashMap<RecordExportIndex, ExportFuncMetadata>,
 }
 
 /// Validate assumptions about the component that must hold for decomposition to be valid
@@ -166,9 +246,9 @@ fn get_export_name_from_kind_idx(
     export.name.clone()
 }
 
-/// Gather linking information for a single `InstantiationArg` into `import_renames`
+/// Gather linking information for a single `InstantiationArg` into `import_md`
 fn gather_instance_link(
-    import_renames: &mut ImportRenames,
+    import_md: &mut ImportMetadata,
     mut member_imports: HashMap<String, ImportsID>,
     component: &Component,
     instance_exports: &Vec<Export>,
@@ -192,9 +272,10 @@ fn gather_instance_link(
                         );
                         match comp_func {
                             ResolvedComponentFunc::Imported { .. } => {
-                                import_renames
-                                    .true_imports
-                                    .insert(core_import_idx, Some(options.clone()));
+                                import_md.true_imports.insert(
+                                    core_import_idx,
+                                    CanonicalOptionsIndex::from_options(&component, &options),
+                                );
                             }
                             ResolvedComponentFunc::Lifted { .. } => {
                                 panic!("Lowered CoreFunc should not come from lifted ComponentFunc")
@@ -218,15 +299,17 @@ fn gather_instance_link(
                             vec![ExternalKind::Func, ExternalKind::FuncExact],
                             func_idx,
                         );
-                        import_renames.members.insert(core_import_idx, export_name);
+                        import_md
+                            .member_renames
+                            .insert(core_import_idx, export_name);
                         // The module_idx is being used for the module ID for now since we don't have nested/imported modules
-                        import_renames
-                            .packages
+                        import_md
+                            .package_renames
                             .insert(core_import_idx, ModuleLinkID(module_idx));
                     }
                     ResolvedCoreFunc::ResourceDrop { .. } => {
                         log::trace!("CoreFunc[{:?}] is a resource drop", export.index);
-                        import_renames.builtins.insert(core_import_idx);
+                        import_md.builtins.insert(core_import_idx);
                     }
                 }
             }
@@ -239,9 +322,11 @@ fn gather_instance_link(
                     vec![ExternalKind::Table],
                     table.table_idx,
                 );
-                import_renames.members.insert(core_import_idx, export_name);
-                import_renames
-                    .packages
+                import_md
+                    .member_renames
+                    .insert(core_import_idx, export_name);
+                import_md
+                    .package_renames
                     .insert(core_import_idx, ModuleLinkID(table.module_idx));
             }
             ExternalKind::Memory => {
@@ -253,9 +338,11 @@ fn gather_instance_link(
                     vec![ExternalKind::Memory],
                     memory.memory_idx,
                 );
-                import_renames.members.insert(core_import_idx, export_name);
-                import_renames
-                    .packages
+                import_md
+                    .member_renames
+                    .insert(core_import_idx, export_name);
+                import_md
+                    .package_renames
                     .insert(core_import_idx, ModuleLinkID(memory.module_idx));
             }
             _ => {
@@ -317,8 +404,9 @@ fn linking_metadata<'a>(component: &Component<'a>) -> Result<LinkingMetadata<'a>
                 );
                 let mut instance_metadata = InstanceLinkingMetadata {
                     module_link_id,
-                    instantiate_order: 0,
-                    import_renames: ImportRenames::default(),
+                    // Works for now since we only consider core instances
+                    instantiate_order: instance_id as u32,
+                    import_md: ImportMetadata::default(),
                 };
                 for arg in args {
                     // Ensure no new kinds of instantiation args are introduced
@@ -334,14 +422,14 @@ fn linking_metadata<'a>(component: &Component<'a>) -> Result<LinkingMetadata<'a>
                         .remove(arg.name)
                         .expect("import should be populated");
                     gather_instance_link(
-                        &mut instance_metadata.import_renames,
+                        &mut instance_metadata.import_md,
                         member_imports,
                         &component,
                         &instance_exports,
                     )?;
                 }
                 log::info!(
-                    "InstanceLinkingMetadata for CoreInstance[{:?}]: {:?}",
+                    "Instantiated CoreInstance[{:?}]: {:?}",
                     instance_id,
                     instance_metadata
                 );
@@ -349,6 +437,9 @@ fn linking_metadata<'a>(component: &Component<'a>) -> Result<LinkingMetadata<'a>
             }
         }
     }
+
+    // TODO: Change when handling component instances - need to consider exports from nested components as well
+
     Ok(linking)
 }
 
@@ -380,6 +471,12 @@ impl<'a> ComponentDecomposed<'a> {
             });
         }
 
+        assert_eq!(
+            linking.mm.len(),
+            linking.instances.len(),
+            "Each module should be instantiated exactly once for now"
+        );
+
         Self {
             modules: linking
                 .mm
@@ -399,13 +496,6 @@ impl<'a> ComponentDecomposed<'a> {
         validate_assumptions(&component)?;
 
         let lm = linking_metadata(&component)?;
-
-        assert_eq!(
-            lm.mm.len(),
-            lm.instances.len(),
-            "Each module should be instantiated exactly once for now"
-        );
-        //println!("Linking Metadata: {:#?}", lm.instances);
 
         let decomposed = Self::from_linking_metadata(lm);
         decomposed.validate_modules()?;
