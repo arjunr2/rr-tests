@@ -115,9 +115,13 @@ impl<'a> Component<'a> {
                     .unwrap_or_else(|| panic!("Component index {} out of bounds", component_idx));
                 if let ComponentNode::Defined { component } = nested_node {
                     let nested = component.borrow();
-                    let export = nested.exports.get(name).unwrap_or_else(|| {
-                        panic!("Export '{}' not found in component {}", name, component_idx)
-                    });
+                    let export = nested
+                        .exports
+                        .iter()
+                        .find(|e| e.name.0 == name)
+                        .unwrap_or_else(|| {
+                            panic!("Export '{}' not found in component {}", name, component_idx)
+                        });
                     if export.kind != expected_kind {
                         panic!(
                             "Export '{}' has kind {:?}, expected {:?}",
@@ -164,6 +168,12 @@ impl<'a> Component<'a> {
                 panic!(
                     "Cannot resolve InstanceExport alias through aliased instance {} - resolve the instance first",
                     instance_idx
+                );
+            }
+            ComponentInstanceNode::Exported(export_idx) => {
+                panic!(
+                    "Cannot resolve InstanceExport alias through exported instance (export_idx {}) - resolve the instance first",
+                    export_idx
                 );
             }
         }
@@ -225,6 +235,12 @@ impl<'a> Component<'a> {
                     ModuleNode::Aliased(_) => {
                         panic!(
                             "Module {} is aliased but should have been resolved",
+                            module_idx
+                        );
+                    }
+                    ModuleNode::Exported(_) => {
+                        panic!(
+                            "Module {} is exported but should have been resolved",
                             module_idx
                         );
                     }
@@ -306,6 +322,10 @@ impl<'a> Resolve<'a> for ModuleNode<'a> {
                 ResolvedModule::Imported(component.get_resolved_import(*import_idx))
             }
             ModuleNode::Aliased(alias) => Self::follow_alias(component, alias),
+            ModuleNode::Exported(export_idx) => {
+                let export = &component.exports[*export_idx as usize];
+                Self::resolve_index(component, export.index)
+            }
         }
     }
 }
@@ -358,6 +378,10 @@ impl<'a> Resolve<'a> for ComponentNode<'a> {
                 ResolvedComponent::Imported(component.get_resolved_import(*import_idx))
             }
             ComponentNode::Aliased(alias) => Self::follow_alias(component, alias),
+            ComponentNode::Exported(export_idx) => {
+                let export = &component.exports[*export_idx as usize];
+                Self::resolve_index(component, export.index)
+            }
         }
     }
 }
@@ -417,6 +441,10 @@ impl<'a> Resolve<'a> for ComponentInstanceNode<'a> {
                 ResolvedComponentInstance::Imported(component.get_resolved_import(*import_idx))
             }
             ComponentInstanceNode::Aliased(alias) => Self::follow_alias(component, alias),
+            ComponentInstanceNode::Exported(export_idx) => {
+                let export = &component.exports[*export_idx as usize];
+                Self::resolve_index(component, export.index)
+            }
         }
     }
 }
@@ -475,6 +503,10 @@ impl<'a> Resolve<'a> for ComponentFuncNode {
                 ResolvedComponentFunc::Imported(component.get_resolved_import(*import_idx))
             }
             ComponentFuncNode::Aliased(alias) => Self::follow_alias(component, alias),
+            ComponentFuncNode::Exported(export_idx) => {
+                let export = &component.exports[*export_idx as usize];
+                Self::resolve_index(component, export.index)
+            }
         }
     }
 }
@@ -522,6 +554,10 @@ impl<'a> Resolve<'a> for ValueNode {
         match self {
             ValueNode::Imported(import_idx) => component.get_resolved_import(*import_idx),
             ValueNode::Aliased(alias) => Self::follow_alias(component, alias),
+            ValueNode::Exported(export_idx) => {
+                let export = &component.exports[*export_idx as usize];
+                Self::resolve_index(component, export.index)
+            }
         }
     }
 }
@@ -572,6 +608,10 @@ impl<'a> Resolve<'a> for TypeNode<'a> {
                 ResolvedType::Imported(component.get_resolved_import(*import_idx))
             }
             TypeNode::Aliased(alias) => Self::follow_alias(component, alias),
+            TypeNode::Exported(export_idx) => {
+                let export = &component.exports[*export_idx as usize];
+                Self::resolve_index(component, export.index)
+            }
         }
     }
 }

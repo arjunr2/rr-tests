@@ -9,9 +9,9 @@ use wirm::wasmparser::{
 };
 
 use crate::ir::{
-    AliasInfo, Component, ComponentExportNode, ComponentFuncNode, ComponentInstanceNode,
-    ComponentNode, ComponentRef, CoreFuncNode, CoreGlobalNode, CoreInstanceNode, CoreMemoryNode,
-    CoreTableNode, CoreTypeNode, ModuleNode, ParentScope, TypeNode, ValueNode,
+    AliasInfo, Component, ComponentFuncNode, ComponentInstanceNode, ComponentNode, ComponentRef,
+    CoreFuncNode, CoreGlobalNode, CoreInstanceNode, CoreMemoryNode, CoreTableNode, CoreTypeNode,
+    ModuleNode, ParentScope, TypeNode, ValueNode,
 };
 
 /// Parse a WebAssembly Component from bytes into our IR.
@@ -403,22 +403,38 @@ fn parse_canon_options(options: &[wasmparser::CanonicalOption]) -> Vec<Canonical
 // Export Handling
 // =============================================================================
 
-fn handle_component_export(component: &mut Component, export: ComponentExport) {
-    let node = ComponentExportNode {
-        name: export.name.0.to_string(),
-        kind: export.kind,
-        index: export.index,
-        ty: export.ty.map(|t| match t {
-            ComponentTypeRef::Module(i) => i,
-            ComponentTypeRef::Func(i) => i,
-            ComponentTypeRef::Value(_) => 0, // Simplified
-            ComponentTypeRef::Type(..) => 0,
-            ComponentTypeRef::Instance(i) => i,
-            ComponentTypeRef::Component(i) => i,
-        }),
-    };
+fn handle_component_export<'a>(component: &mut Component<'a>, export: ComponentExport<'a>) {
+    let export_idx = component.exports.len() as u32;
+    component.exports.push(export);
 
-    component.exports.insert(export.name.0.to_string(), node);
+    // Add an Exported entry to the appropriate index space
+    let export_ref = &component.exports[export_idx as usize];
+    match export_ref.kind {
+        ComponentExternalKind::Module => {
+            component.modules.push(ModuleNode::Exported(export_idx));
+        }
+        ComponentExternalKind::Func => {
+            component
+                .funcs
+                .push(ComponentFuncNode::Exported(export_idx));
+        }
+        ComponentExternalKind::Value => {
+            component.values.push(ValueNode::Exported(export_idx));
+        }
+        ComponentExternalKind::Type => {
+            component.types.push(TypeNode::Exported(export_idx));
+        }
+        ComponentExternalKind::Instance => {
+            component
+                .instances
+                .push(ComponentInstanceNode::Exported(export_idx));
+        }
+        ComponentExternalKind::Component => {
+            component
+                .components
+                .push(ComponentNode::Exported(export_idx));
+        }
+    }
 }
 
 // =============================================================================

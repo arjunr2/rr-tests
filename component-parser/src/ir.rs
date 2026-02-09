@@ -8,7 +8,6 @@ pub use index_space::IndexSpace;
 pub use nodes::*;
 pub use resolve::Resolve;
 
-use indexmap::IndexMap;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use wirm::wasmparser::ComponentImport;
@@ -56,8 +55,8 @@ pub struct Component<'a> {
     pub core_globals: IndexSpace<CoreGlobalNode>,
     pub core_types: IndexSpace<CoreTypeNode<'a>>,
 
-    // Exports (name -> what is exported)
-    pub exports: IndexMap<String, ComponentExportNode>,
+    // Exports
+    pub exports: Vec<ComponentExport<'a>>,
 }
 
 impl<'a> Default for Component<'a> {
@@ -77,7 +76,7 @@ impl<'a> Default for Component<'a> {
             core_tables: IndexSpace::default(),
             core_globals: IndexSpace::default(),
             core_types: IndexSpace::default(),
-            exports: IndexMap::new(),
+            exports: Vec::new(),
         }
     }
 }

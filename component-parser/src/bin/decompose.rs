@@ -10,7 +10,9 @@ use std::fs;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::rc::Rc;
-use wirm::wasmparser::{CanonicalOption, ExternalKind, InstantiationArgKind};
+use wirm::wasmparser::{
+    CanonicalOption, ComponentExternalKind, ExternalKind, InstantiationArgKind,
+};
 
 use component_parser::Component;
 use component_parser::ir::{
@@ -82,7 +84,7 @@ type InstantiateOrder = u32;
 struct ModuleExport(ModuleLinkID, String);
 
 /// The export index as assigned by the recorder in RR.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Hash)]
 struct RecordExportIndex(u32);
 
 /// Index for canonical options adapters within a module's IR.
@@ -178,7 +180,7 @@ struct InstanceLinkingMetadata {
 /// Metadata to identify core functions being exported.
 struct ExportFuncMetadata {
     index: ModuleExport,
-    opts: CanonicalOptionsIndex,
+    opts: Option<CanonicalOptionsIndex>,
 }
 
 /// Metadata needed to capture complete linking information for a component for CRIMP replay custom section
@@ -188,7 +190,7 @@ struct LinkingMetadata<'a> {
     mm: HashMap<ModuleLinkID, ModuleMetadata<'a>>,
     /// The linking information for each instantiated module
     instances: Vec<InstanceLinkingMetadata>,
-    /// The exported functions from this component. Each
+    /// The exported functions from this component
     export_funcs: HashMap<RecordExportIndex, ExportFuncMetadata>,
 }
 
@@ -357,6 +359,68 @@ fn gather_instance_link(
     Ok(())
 }
 
+/// Gather exported functions from the component and return them
+///
+/// TODO: Change when handling component instances - need to consider exports from nested components as well.
+/// Right now, we can simply use the `export_id` from enumerating exports, but this will change when we have exports from instances
+fn gather_component_exports(
+    export_funcs: &mut HashMap<RecordExportIndex, ExportFuncMetadata>,
+    component: &Component,
+) -> Result<()> {
+    for (export_id, export) in component.exports.iter().enumerate() {
+        match export.kind {
+            ComponentExternalKind::Func => match component.resolve_component_func(export.index) {
+                ResolvedComponentFunc::Imported(_) => {
+                    unsupported!("Export of imported component functions")?;
+                }
+                ResolvedComponentFunc::Lifted {
+                    core_func_idx,
+                    type_idx: _type_idx,
+                    options,
+                } => {
+                    let core_func = component.resolve_core_func(core_func_idx);
+                    match core_func {
+                        ResolvedCoreFunc::FromModule {
+                            module_idx,
+                            func_idx,
+                        } => {
+                            export_funcs.insert(
+                                RecordExportIndex(export_id as u32),
+                                ExportFuncMetadata {
+                                    index: ModuleExport(
+                                        ModuleLinkID(module_idx),
+                                        get_export_name_from_kind_idx(
+                                            component,
+                                            module_idx,
+                                            vec![ExternalKind::Func, ExternalKind::FuncExact],
+                                            func_idx,
+                                        ),
+                                    ),
+                                    opts: CanonicalOptionsIndex::from_options(&component, &options),
+                                },
+                            );
+                        }
+                        _ => {
+                            unsupported!(
+                                "Lifted ComponentFunc sourced from non-FromModule CoreFuncs"
+                            )?;
+                        }
+                    }
+                }
+            },
+
+            _ => {
+                log::warn!(
+                    "Export kind from {:?} is not supported for access yet..",
+                    export
+                );
+            }
+        }
+    }
+    log::trace!("Gathered export funcs: {:?}", export_funcs);
+    Ok(())
+}
+
 /// Construct the [`ModuleLinkingMetadata`] for the component
 fn linking_metadata<'a>(component: &Component<'a>) -> Result<LinkingMetadata<'a>> {
     // Keep track of synthetic export instances
@@ -439,6 +503,7 @@ fn linking_metadata<'a>(component: &Component<'a>) -> Result<LinkingMetadata<'a>
     }
 
     // TODO: Change when handling component instances - need to consider exports from nested components as well
+    gather_component_exports(&mut linking.export_funcs, &component)?;
 
     Ok(linking)
 }

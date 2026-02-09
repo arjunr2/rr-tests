@@ -40,6 +40,8 @@ pub enum ModuleNode<'a> {
         /// Parsed module IR from wirm
         module: Module<'a>,
     },
+    /// Exported - index into component's exports vector
+    Exported(u32),
 }
 
 /// A nested component in the component index space.
@@ -52,19 +54,9 @@ pub enum ComponentNode<'a> {
         /// Recursively parsed component (Rc<RefCell> for shared access and parent chain setup)
         component: super::ComponentRef<'a>,
     },
+    /// Exported - index into component's exports vector
+    Exported(u32),
 }
-
-//impl<'a> Clone for ComponentNode<'a> {
-//    fn clone(&self) -> Self {
-//        match self {
-//            Self::Imported(idx) => Self::Imported(*idx),
-//            Self::Aliased(info) => Self::Aliased(info.clone()),
-//            Self::Defined { component } => Self::Defined {
-//                component: component.clone(), // Clones the Rc, not the inner data
-//            },
-//        }
-//    }
-//}
 
 /// A component instance in the instance index space.
 #[derive(Debug, Clone)]
@@ -79,6 +71,8 @@ pub enum ComponentInstanceNode<'a> {
     },
     /// Created inline from a list of exports
     FromExports(Vec<ComponentExport<'a>>),
+    /// Exported - index into component's exports vector
+    Exported(u32),
 }
 
 /// A component function in the func index space.
@@ -93,6 +87,8 @@ pub enum ComponentFuncNode {
         type_idx: u32,
         options: Vec<CanonicalOption>,
     },
+    /// Exported - index into component's exports vector
+    Exported(u32),
 }
 
 /// A value in the value index space.
@@ -101,6 +97,8 @@ pub enum ValueNode {
     /// Imported value - index into component's imports vector
     Imported(u32),
     Aliased(AliasInfo),
+    /// Exported - index into component's exports vector
+    Exported(u32),
 }
 
 /// A type in the type index space.
@@ -111,6 +109,8 @@ pub enum TypeNode<'a> {
     Aliased(AliasInfo),
     /// Imported type - index into component's imports vector
     Imported(u32),
+    /// Exported - index into component's exports vector
+    Exported(u32),
 }
 
 // =============================================================================
@@ -169,20 +169,6 @@ pub enum CoreTypeNode<'a> {
     Aliased(AliasInfo),
     /// Defined inline (from wasmparser)
     Defined(CoreType<'a>),
-}
-
-// =============================================================================
-// Exports
-// =============================================================================
-
-/// An export from this component.
-#[derive(Debug, Clone)]
-pub struct ComponentExportNode {
-    pub name: String,
-    pub kind: ComponentExternalKind,
-    pub index: u32,
-    /// Optional type ascription
-    pub ty: Option<u32>,
 }
 
 // =============================================================================
