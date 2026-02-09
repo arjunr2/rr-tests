@@ -179,7 +179,9 @@ struct InstanceLinkingMetadata {
 #[derive(Debug)]
 /// Metadata to identify core functions being exported.
 struct ExportFuncMetadata {
-    index: ModuleExport,
+    name: String,
+    /// ID, as assigned to this export by the CRIMP recorder.
+    record_id: RecordExportIndex,
     opts: Option<CanonicalOptionsIndex>,
 }
 
@@ -190,8 +192,8 @@ struct LinkingMetadata<'a> {
     mm: HashMap<ModuleLinkID, ModuleMetadata<'a>>,
     /// The linking information for each instantiated module
     instances: Vec<InstanceLinkingMetadata>,
-    /// The exported functions from this component
-    export_funcs: HashMap<RecordExportIndex, ExportFuncMetadata>,
+    /// The exported functions from this component arranged by the module they are sourced from.
+    export_funcs: HashMap<ModuleLinkID, Vec<ExportFuncMetadata>>,
 }
 
 /// Validate assumptions about the component that must hold for decomposition to be valid
@@ -364,7 +366,7 @@ fn gather_instance_link(
 /// TODO: Change when handling component instances - need to consider exports from nested components as well.
 /// Right now, we can simply use the `export_id` from enumerating exports, but this will change when we have exports from instances
 fn gather_component_exports(
-    export_funcs: &mut HashMap<RecordExportIndex, ExportFuncMetadata>,
+    export_funcs: &mut HashMap<ModuleLinkID, Vec<ExportFuncMetadata>>,
     component: &Component,
 ) -> Result<()> {
     for (export_id, export) in component.exports.iter().enumerate() {
@@ -384,21 +386,19 @@ fn gather_component_exports(
                             module_idx,
                             func_idx,
                         } => {
-                            export_funcs.insert(
-                                RecordExportIndex(export_id as u32),
-                                ExportFuncMetadata {
-                                    index: ModuleExport(
-                                        ModuleLinkID(module_idx),
-                                        get_export_name_from_kind_idx(
-                                            component,
-                                            module_idx,
-                                            vec![ExternalKind::Func, ExternalKind::FuncExact],
-                                            func_idx,
-                                        ),
+                            export_funcs
+                                .entry(ModuleLinkID(module_idx))
+                                .or_default()
+                                .push(ExportFuncMetadata {
+                                    record_id: RecordExportIndex(export_id as u32),
+                                    name: get_export_name_from_kind_idx(
+                                        component,
+                                        module_idx,
+                                        vec![ExternalKind::Func, ExternalKind::FuncExact],
+                                        func_idx,
                                     ),
                                     opts: CanonicalOptionsIndex::from_options(&component, &options),
-                                },
-                            );
+                                });
                         }
                         _ => {
                             unsupported!(
@@ -502,9 +502,7 @@ fn linking_metadata<'a>(component: &Component<'a>) -> Result<LinkingMetadata<'a>
         }
     }
 
-    // TODO: Change when handling component instances - need to consider exports from nested components as well
     gather_component_exports(&mut linking.export_funcs, &component)?;
-
     Ok(linking)
 }
 
@@ -526,6 +524,12 @@ impl<'a> ComponentDecomposed<'a> {
     }
 
     fn from_linking_metadata(linking: LinkingMetadata<'a>) -> Self {
+        assert_eq!(
+            linking.mm.len(),
+            linking.instances.len(),
+            "Each module should be instantiated exactly once for now"
+        );
+
         fn set_module_name(module: &mut Module, idx: usize) {
             if module.module_name.is_none() {
                 module.module_name = Some(format!("module_{}", idx));
@@ -535,12 +539,6 @@ impl<'a> ComponentDecomposed<'a> {
                 data: Cow::from(b""),
             });
         }
-
-        assert_eq!(
-            linking.mm.len(),
-            linking.instances.len(),
-            "Each module should be instantiated exactly once for now"
-        );
 
         Self {
             modules: linking
@@ -559,9 +557,7 @@ impl<'a> ComponentDecomposed<'a> {
     fn from_component(component_rc: Rc<RefCell<Component<'a>>>) -> Result<Self> {
         let component = component_rc.borrow();
         validate_assumptions(&component)?;
-
         let lm = linking_metadata(&component)?;
-
         let decomposed = Self::from_linking_metadata(lm);
         decomposed.validate_modules()?;
         Ok(decomposed)
