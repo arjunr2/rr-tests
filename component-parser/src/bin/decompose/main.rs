@@ -3,11 +3,11 @@
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use env_logger;
+use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::ops::Deref;
 use std::path::PathBuf;
 use std::rc::Rc;
 use wirm::wasmparser::{
@@ -22,8 +22,10 @@ use component_parser::ir::{
 use component_parser::parse_component;
 use component_parser::wasmparser::Validator;
 use component_parser::wirm::Module;
-use component_parser::wirm::ir::id::ImportsID;
 use component_parser::wirm::ir::types::CustomSection;
+
+mod linking;
+use linking::*;
 
 macro_rules! unsupported {
     // Single argument: unconditional error
@@ -58,46 +60,12 @@ struct CLI {
     outdir: PathBuf,
 }
 
-#[derive(Debug)]
-/// Metadata associated with a module that is instantiated in the component
-struct ModuleMetadata<'a> {
-    /// The module
-    module: Module<'a>,
-    /// Map of its imports (to prevent re-computation when it is instantiated multiple times)
-    import_map: HashMap<String, HashMap<String, ImportsID>>,
-}
-
-/// Index into [`LinkingMetadata::mm`]
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
-struct ModuleLinkID(u32);
-impl Deref for ModuleLinkID {
-    type Target = u32;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-type InstantiateOrder = u32;
-/// Index type into a (module, export_name)
-#[derive(Debug, Clone)]
-struct ModuleExport(ModuleLinkID, String);
-
-/// The export index as assigned by the recorder in RR.
-#[derive(Debug, Clone, PartialEq, Eq, Copy, Hash)]
-struct RecordExportIndex(u32);
-
-/// Index for canonical options adapters within a module's IR.
-#[derive(Debug, Default)]
-struct CanonicalOptionsIndex {
-    memory: Option<ModuleExport>,
-    realloc: Option<ModuleExport>,
-    post_return: Option<ModuleExport>,
-}
-
 impl CanonicalOptionsIndex {
     /// Indexes the options for a canonical function within the module's IR
-    fn from_options<'a>(component: &Component<'a>, options: &[CanonicalOption]) -> Option<Self> {
+    pub fn from_options<'a>(
+        component: &Component<'a>,
+        options: &[CanonicalOption],
+    ) -> Option<Self> {
         fn func_resolve<'a>(component: &Component<'a>, func_idx: u32) -> ModuleExport {
             match component.resolve_core_func(func_idx) {
                 ResolvedCoreFunc::FromModule {
@@ -148,54 +116,6 @@ impl CanonicalOptionsIndex {
     }
 }
 
-/// Metadata capturing all the import linking information for a module instantiation
-///
-/// For a given instance, every import ID in the module must fall into at least
-/// one of these fields.
-#[derive(Debug, Default)]
-struct ImportMetadata {
-    /// Renames for import packages with the module name
-    pub package_renames: HashMap<ImportsID, ModuleLinkID>,
-    /// Renames for import members with the member name
-    pub member_renames: HashMap<ImportsID, String>,
-    /// The IDs for the imports in this module that are true imports (not linked into from sister modules)
-    /// with optional canonical options if they are canonical lowers.
-    pub true_imports: HashMap<ImportsID, Option<CanonicalOptionsIndex>>,
-    /// The IDs for the imports in this module that are builtins (e.g. from canonical options)
-    pub builtins: HashSet<ImportsID>,
-}
-
-/// Metadata needed to capture the linking information for a module for CRIMP replay custom section
-#[derive(Debug)]
-struct InstanceLinkingMetadata {
-    /// The module from which this instance was created
-    module_link_id: ModuleLinkID,
-    /// The order in which this module should be instantiated w.r.t other modules
-    instantiate_order: InstantiateOrder,
-    /// The import metadata needed for this module to be correctly linked to sister modules
-    import_md: ImportMetadata,
-}
-
-#[derive(Debug)]
-/// Metadata to identify core functions being exported.
-struct ExportFuncMetadata {
-    name: String,
-    /// ID, as assigned to this export by the CRIMP recorder.
-    record_id: RecordExportIndex,
-    opts: Option<CanonicalOptionsIndex>,
-}
-
-/// Metadata needed to capture complete linking information for a component for CRIMP replay custom section
-#[derive(Debug, Default)]
-struct LinkingMetadata<'a> {
-    /// The metadata for each module in the component needed for linking and replaying
-    mm: HashMap<ModuleLinkID, ModuleMetadata<'a>>,
-    /// The linking information for each instantiated module
-    instances: Vec<InstanceLinkingMetadata>,
-    /// The exported functions from this component arranged by the module they are sourced from.
-    export_funcs: HashMap<ModuleLinkID, Vec<ExportFuncMetadata>>,
-}
-
 /// Validate assumptions about the component that must hold for decomposition to be valid
 ///
 /// Relax these as we build out this tool. Currently, we stop the following:
@@ -228,7 +148,7 @@ fn validate_assumptions<'a>(component: &Component<'a>) -> Result<()> {
     Ok(())
 }
 
-fn get_export_name_from_kind_idx(
+pub(crate) fn get_export_name_from_kind_idx(
     component: &Component,
     module_idx: u32,
     kinds: Vec<ExternalKind>,
@@ -253,15 +173,15 @@ fn get_export_name_from_kind_idx(
 /// Gather linking information for a single `InstantiationArg` into `import_md`
 fn gather_instance_link(
     import_md: &mut ImportMetadata,
-    mut member_imports: HashMap<String, ImportsID>,
+    mut member_imports: HashMap<String, CoreImportIndex>,
     component: &Component,
     instance_exports: &Vec<Export>,
 ) -> Result<()> {
     for export in instance_exports.iter() {
-        //get_export_in_core_instance(export, &member_imports)?;
-        let core_import_idx = member_imports
+        let core_import_idx: CoreImportIndex = member_imports
             .remove(&export.name.to_string())
-            .expect("export should be matched by an import");
+            .expect("export should be matched by an import")
+            .into();
         match export.kind {
             ExternalKind::Func => {
                 let core_func = component.resolve_core_func(export.index);
@@ -422,10 +342,16 @@ fn gather_component_exports(
 }
 
 /// Construct the [`ModuleLinkingMetadata`] for the component
-fn linking_metadata<'a>(component: &Component<'a>) -> Result<LinkingMetadata<'a>> {
+fn linking_metadata<'a>(
+    component: &Component<'a>,
+    checksum: Checksum,
+) -> Result<LinkingMetadata<'a>> {
     // Keep track of synthetic export instances
     let mut synthetic_core_instances_exports = HashMap::<u32, Vec<Export>>::new();
-    let mut linking = LinkingMetadata::default();
+    let mut linking = LinkingMetadata {
+        checksum,
+        ..Default::default()
+    };
     // Only needs to handle core instances for now
     for (instance_id, instance) in component.core_instances.iter().enumerate() {
         if let CoreInstanceNode::Aliased(alias) = instance {
@@ -448,7 +374,7 @@ fn linking_metadata<'a>(component: &Component<'a>) -> Result<LinkingMetadata<'a>
                             .import_map
                             .entry(import.module.as_ref().to_owned())
                             .or_default();
-                        members.insert(import.name.to_string(), ImportsID(i as u32));
+                        members.insert(import.name.to_string(), CoreImportIndex(i as u32));
                     }
                     metadata
                 });
@@ -523,42 +449,51 @@ impl<'a> ComponentDecomposed<'a> {
         Ok(())
     }
 
-    fn from_linking_metadata(linking: LinkingMetadata<'a>) -> Self {
+    fn from_linking_metadata(mut linking: LinkingMetadata<'a>) -> Result<Self> {
         assert_eq!(
             linking.mm.len(),
             linking.instances.len(),
             "Each module should be instantiated exactly once for now"
         );
 
-        fn set_module_name(module: &mut Module, idx: usize) {
-            if module.module_name.is_none() {
-                module.module_name = Some(format!("module_{}", idx));
-            }
-            let _cid = module.custom_sections.add(CustomSection {
-                name: "crimp-replay",
-                data: Cow::from(b""),
-            });
-        }
+        let instantiated_modules = linking.mm.keys().collect::<HashSet<_>>();
+        let export_func_modules = linking.export_funcs.keys().collect::<HashSet<_>>();
+        assert!(
+            export_func_modules.is_subset(&instantiated_modules),
+            "Exported functions should only come from instantiated modules"
+        );
 
-        Self {
-            modules: linking
-                .mm
-                .into_values()
-                .enumerate()
-                .map(|(i, mut m)| {
-                    set_module_name(&mut m.module, i);
-                    m.module
-                })
-                .collect(),
-        }
+        linking
+            .mm
+            .iter_mut()
+            .for_each(|(id, md)| md.module.module_name = Some(format!("module_{}", **id as usize)));
+
+        let modules = linking
+            .mm
+            .iter()
+            .map(|(module_id, module_metadata)| {
+                let crimp = linking.serialize_crimp_section(*module_id)?;
+                let mut module = module_metadata.module.clone();
+                let _cid = module.custom_sections.add(CustomSection {
+                    name: "crimp-replay",
+                    data: Cow::from(crimp),
+                });
+                Ok(module)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(Self { modules })
     }
 
     /// Produce a [ComponentDecomposed] from a [Component]
-    fn from_component(component_rc: Rc<RefCell<Component<'a>>>) -> Result<Self> {
+    fn from_component(
+        component_rc: Rc<RefCell<Component<'a>>>,
+        checksum: Checksum,
+    ) -> Result<Self> {
         let component = component_rc.borrow();
         validate_assumptions(&component)?;
-        let lm = linking_metadata(&component)?;
-        let decomposed = Self::from_linking_metadata(lm);
+        let lm = linking_metadata(&component, checksum)?;
+        let decomposed = Self::from_linking_metadata(lm)?;
         decomposed.validate_modules()?;
         Ok(decomposed)
     }
@@ -596,6 +531,7 @@ fn main() -> Result<()> {
         .validate_all(&file)
         .with_context(|| "Validation failed")?;
 
+    let checksum: Checksum = Sha256::digest(&file).as_slice().try_into().unwrap();
     let component_rc = parse_component(&file).with_context(|| "Failed to parse component")?;
 
     if cli.outdir.exists() {
@@ -603,7 +539,7 @@ fn main() -> Result<()> {
     }
     fs::create_dir(&cli.outdir)?;
 
-    let decomposed = ComponentDecomposed::from_component(component_rc)?;
+    let decomposed = ComponentDecomposed::from_component(component_rc, checksum)?;
     decomposed.dump_to_files(cli.wat, &cli.outdir)?;
     Ok(())
 }
