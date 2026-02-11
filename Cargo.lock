@@ -561,19 +561,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "decompose-alt"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "clap",
- "env_logger",
- "log",
- "wasmprinter 0.244.0",
- "wat",
- "wirm",
-]
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

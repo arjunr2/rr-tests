@@ -4,7 +4,6 @@ members = [
     "snapshot",
     "wasi-modules",
     "component-parser",
-    "decompose-alt"
 ]
 resolver = "3"
 
