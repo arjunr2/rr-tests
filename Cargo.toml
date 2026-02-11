@@ -20,7 +20,6 @@ anyhow = "1.0.100"
 log = "0.4.28"
 wasmtime = { path = "../wasmtime-rr-prototyping/crates/wasmtime" }
 wasmtime-wasi = { path = "../wasmtime-rr-prototyping/crates/wasi", features = ["default"] }
-wasm-crimp = { path = "../wasmtime-rr-prototyping/crates/wasm-crimp", features = ["std"] }
 #wasmtime = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["default"] }
 #wasmtime-wasi = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["default"] }
 #wasm-crimp = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["std"] }

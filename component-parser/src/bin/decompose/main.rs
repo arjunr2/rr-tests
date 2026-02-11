@@ -2,6 +2,9 @@
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
+use component_parser::wasmparser::{
+    CanonicalOption, ComponentExternalKind, ExternalKind, InstantiationArgKind, Validator,
+};
 use env_logger;
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
@@ -10,18 +13,15 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
-use wirm::wasmparser::{
-    CanonicalOption, ComponentExternalKind, ExternalKind, InstantiationArgKind,
-};
 
 use component_parser::Component;
 use component_parser::ir::{
-    CoreInstanceNode, Export, Resolve, ResolvedComponentFunc, ResolvedComponentInstance,
-    ResolvedCoreFunc, ResolvedCoreInstance, ResolvedModule,
+    CoreInstanceNode, Resolve, ResolvedComponentFunc, ResolvedComponentInstance, ResolvedCoreFunc,
+    ResolvedCoreInstance, ResolvedModule,
 };
 use component_parser::parse_component;
-use component_parser::wasmparser::Validator;
 use component_parser::wirm::Module;
+use component_parser::wirm::ir::module::module_exports::Export;
 use component_parser::wirm::ir::types::CustomSection;
 
 mod linking;
@@ -58,6 +58,20 @@ struct CLI {
     /// Output directory for decomposed modules from component.
     #[arg(short, long)]
     outdir: PathBuf,
+}
+
+#[derive(Debug, Copy, Clone)]
+/// The kind of instance that was created
+enum InstanceKind {
+    FromExports,
+    FromInstantiated(ModuleID),
+}
+
+#[derive(Debug, Clone)]
+/// Interface for exports from an instance that are linked as args during instantiation
+struct InstanceExportInterface {
+    exports: Vec<Export>,
+    kind: InstanceKind,
 }
 
 impl CanonicalOptionsIndex {
@@ -185,113 +199,133 @@ fn gather_instance_link(
     link_imports: &mut HashMap<ModuleImportIndex, ImportKind>,
     mut member_imports: HashMap<String, ModuleImportIndex>,
     component: &Component,
-    instance_exports: &Vec<Export>,
+    export_if: &InstanceExportInterface,
     instance_map: &HashMap<ModuleInstanceID, ModuleID>,
 ) -> Result<()> {
-    for export in instance_exports.iter() {
+    for export in export_if.exports.iter() {
         let core_import_idx: ModuleImportIndex = member_imports
             .remove(&export.name.to_string())
             .expect("export should be matched by an import")
             .into();
-        match export.kind {
-            ExternalKind::Func => {
-                let core_func = component.resolve_core_func(export.index);
-                match core_func {
-                    ResolvedCoreFunc::Lowered { func_idx, options } => {
-                        let comp_func = component.resolve_component_func(func_idx);
-                        log::trace!(
-                            "CoreFunc[{:?}] lowered from ComponentFunc[{:?}] with options {:?}",
-                            export.index,
-                            comp_func,
-                            options
-                        );
-                        match comp_func {
-                            ResolvedComponentFunc::Imported { .. } => {
+        match export_if.kind {
+            InstanceKind::FromExports => {
+                match export.kind {
+                    ExternalKind::Func => {
+                        let core_func = component.resolve_core_func(export.index);
+                        match core_func {
+                            ResolvedCoreFunc::Lowered { func_idx, options } => {
+                                let comp_func = component.resolve_component_func(func_idx);
+                                log::trace!(
+                                    "CoreFunc[{:?}] lowered from ComponentFunc[{:?}] with options {:?}",
+                                    export.index,
+                                    comp_func,
+                                    options
+                                );
+                                match comp_func {
+                                    ResolvedComponentFunc::Imported { .. } => {
+                                        link_imports.insert(
+                                            core_import_idx,
+                                            ImportKind::TrueImport(
+                                                CanonicalOptionsIndex::from_options(
+                                                    &component,
+                                                    &options,
+                                                    instance_map,
+                                                ),
+                                            ),
+                                        );
+                                    }
+                                    ResolvedComponentFunc::Lifted { .. } => {
+                                        panic!(
+                                            "Lowered CoreFunc should not come from lifted ComponentFunc"
+                                        )
+                                    }
+                                }
+                            }
+                            ResolvedCoreFunc::FromModule {
+                                module_idx,
+                                func_idx,
+                            } => {
+                                let module_id = ModuleID(module_idx);
+                                log::trace!(
+                                    "CoreFunc[{:?}] from module {:?} func idx {:?}",
+                                    export.index,
+                                    module_idx,
+                                    func_idx
+                                );
+                                // This is safe since we assume no imported modules for now
+                                let export_name = get_export_name_from_kind_idx(
+                                    component,
+                                    module_idx,
+                                    vec![ExternalKind::Func, ExternalKind::FuncExact],
+                                    func_idx,
+                                );
                                 link_imports.insert(
                                     core_import_idx,
-                                    ImportKind::TrueImport(CanonicalOptionsIndex::from_options(
-                                        &component,
-                                        &options,
-                                        instance_map,
-                                    )),
+                                    ImportKind::Rename {
+                                        // The module_idx is being used for the module ID for now since we don't have nested/imported modules
+                                        package: assumed_instance_id(instance_map, module_id),
+                                        member: export_name,
+                                    },
                                 );
                             }
-                            ResolvedComponentFunc::Lifted { .. } => {
-                                panic!("Lowered CoreFunc should not come from lifted ComponentFunc")
+                            ResolvedCoreFunc::ResourceDrop { .. } => {
+                                log::trace!("CoreFunc[{:?}] is a resource drop", export.index);
+                                link_imports.insert(core_import_idx, ImportKind::Builtin);
                             }
                         }
                     }
-                    ResolvedCoreFunc::FromModule {
-                        module_idx,
-                        func_idx,
-                    } => {
-                        let module_id = ModuleID(module_idx);
-                        log::trace!(
-                            "CoreFunc[{:?}] from module {:?} func idx {:?}",
-                            export.index,
-                            module_idx,
-                            func_idx
-                        );
-                        // This is safe since we assume no imported modules for now
+                    ExternalKind::Table => {
+                        let table = component.resolve_core_table(export.index);
+                        let module_id = ModuleID(table.module_idx);
+                        log::trace!("CoreTable resolved to {:?}", table);
                         let export_name = get_export_name_from_kind_idx(
                             component,
-                            module_idx,
-                            vec![ExternalKind::Func, ExternalKind::FuncExact],
-                            func_idx,
+                            table.module_idx,
+                            vec![ExternalKind::Table],
+                            table.table_idx,
                         );
                         link_imports.insert(
                             core_import_idx,
                             ImportKind::Rename {
-                                // The module_idx is being used for the module ID for now since we don't have nested/imported modules
                                 package: assumed_instance_id(instance_map, module_id),
                                 member: export_name,
                             },
                         );
                     }
-                    ResolvedCoreFunc::ResourceDrop { .. } => {
-                        log::trace!("CoreFunc[{:?}] is a resource drop", export.index);
-                        link_imports.insert(core_import_idx, ImportKind::Builtin);
+                    ExternalKind::Memory => {
+                        println!("Resolving CoreMemory export: {:?}", export);
+                        let memory = component.resolve_core_memory(export.index);
+                        let module_id = ModuleID(memory.module_idx);
+                        log::trace!("CoreMemory resolved to {:?}", memory);
+                        let export_name = get_export_name_from_kind_idx(
+                            component,
+                            memory.module_idx,
+                            vec![ExternalKind::Memory],
+                            memory.memory_idx,
+                        );
+                        link_imports.insert(
+                            core_import_idx,
+                            ImportKind::Rename {
+                                package: assumed_instance_id(instance_map, module_id),
+                                member: export_name,
+                            },
+                        );
+                    }
+                    _ => {
+                        unsupported!(format!("Linking of export kind {:?}", export.kind))?;
                     }
                 }
             }
-            ExternalKind::Table => {
-                let table = component.resolve_core_table(export.index);
-                let module_id = ModuleID(table.module_idx);
-                log::trace!("CoreTable resolved to {:?}", table);
-                let export_name = get_export_name_from_kind_idx(
-                    component,
-                    table.module_idx,
-                    vec![ExternalKind::Table],
-                    table.table_idx,
-                );
+            InstanceKind::FromInstantiated(module_id) => {
+                // If exports are linked directly from instantiated modules, this operates exactly
+                // like core Wasm module linking, and hence we only need to do Renaming
                 link_imports.insert(
                     core_import_idx,
                     ImportKind::Rename {
                         package: assumed_instance_id(instance_map, module_id),
-                        member: export_name,
+                        member: export.name.to_string(),
                     },
                 );
-            }
-            ExternalKind::Memory => {
-                let memory = component.resolve_core_memory(export.index);
-                let module_id = ModuleID(memory.module_idx);
-                log::trace!("CoreMemory resolved to {:?}", memory);
-                let export_name = get_export_name_from_kind_idx(
-                    component,
-                    memory.module_idx,
-                    vec![ExternalKind::Memory],
-                    memory.memory_idx,
-                );
-                link_imports.insert(
-                    core_import_idx,
-                    ImportKind::Rename {
-                        package: assumed_instance_id(instance_map, module_id),
-                        member: export_name,
-                    },
-                );
-            }
-            _ => {
-                unsupported!(format!("Linking of export kind {:?}", export.kind))?;
             }
         }
     }
@@ -398,7 +432,7 @@ fn linking_metadata<'a>(
     checksum: Checksum,
 ) -> Result<LinkingMetadata<'a>> {
     // Keep track of synthetic export instances (NOT with InstanceID, but with the actual index value in the component)
-    let mut synthetic_core_instances_exports = HashMap::<u32, Vec<Export>>::new();
+    let mut synthetic_core_instances_exports = HashMap::<u32, InstanceExportInterface>::new();
     let mut linking = LinkingMetadata {
         checksum,
         ..Default::default()
@@ -414,10 +448,31 @@ fn linking_metadata<'a>(
         }
         match instance.resolve(&component) {
             ResolvedCoreInstance::FromExports(exports) => {
-                synthetic_core_instances_exports.insert(instance_idx as u32, exports);
+                synthetic_core_instances_exports.insert(
+                    instance_idx as u32,
+                    InstanceExportInterface {
+                        exports: exports.iter().map(|e| (*e).into()).collect(),
+                        kind: InstanceKind::FromExports,
+                    },
+                );
             }
             ResolvedCoreInstance::Instantiated { module_idx, args } => {
                 let module_id = ModuleID(module_idx);
+                // Register the exports for this core instance
+                synthetic_core_instances_exports.insert(
+                    instance_idx as u32,
+                    InstanceExportInterface {
+                        exports: component
+                            .resolve_module(module_idx)
+                            .defined()
+                            .exports
+                            .iter()
+                            .map(|export| export.clone())
+                            .collect(),
+                        kind: InstanceKind::FromInstantiated(module_id),
+                    },
+                );
+
                 // Gather linking information from args
                 let module_metadata = linking.mm.entry(module_id).or_insert_with(|| {
                     // Populate import map for the module being instantiated
@@ -454,7 +509,7 @@ fn linking_metadata<'a>(
                         InstantiationArgKind::Instance => {}
                     };
                     // Get the export for instance providing 'arg.name' package
-                    let instance_exports = synthetic_core_instances_exports
+                    let instance_export_if = synthetic_core_instances_exports
                         .get(&arg.index)
                         .expect("exported core instance should be already populated");
                     // Get imports for 'arg.name' package
@@ -465,7 +520,7 @@ fn linking_metadata<'a>(
                         &mut instance_metadata.imports,
                         member_imports,
                         &component,
-                        &instance_exports,
+                        &instance_export_if,
                         &linking.instance_map,
                     )?;
                 }

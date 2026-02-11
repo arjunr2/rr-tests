@@ -153,9 +153,9 @@ struct ImportAdapterCrimpData {
     /// The import index that this adapter is for
     target: ModuleImportIndex,
     /// The memory to use for adapter
-    memory: ModuleInstanceExport,
+    memory: Option<ModuleInstanceExport>,
     /// The realloc to use for adapter
-    realloc: ModuleInstanceExport,
+    realloc: Option<ModuleInstanceExport>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -201,7 +201,7 @@ impl<'a> LinkingMetadata<'a> {
                     // Engine will stub with the replay result
                     // Just provide a nice readable name
                     module.imports.set_import_name(
-                        "replay".into(),
+                        "crimp-replay".into(),
                         format!("builtin{}", counter),
                         WirmImportsID(*idx),
                     );
@@ -211,7 +211,7 @@ impl<'a> LinkingMetadata<'a> {
                     // Engine will stub with the replay result
                     // Just provide a nice readable name
                     module.imports.set_import_name(
-                        "replay".into(),
+                        "crimp-replay".into(),
                         format!("stub{}", counter),
                         WirmImportsID(*idx),
                     );
@@ -224,8 +224,8 @@ impl<'a> LinkingMetadata<'a> {
                         // When memory and realloc are always set together, if present
                         import_adapters.push(ImportAdapterCrimpData {
                             target: idx,
-                            memory: opts.memory.unwrap(),
-                            realloc: opts.realloc.unwrap(),
+                            memory: opts.memory.clone(),
+                            realloc: opts.realloc.clone(),
                         });
                     }
                 }

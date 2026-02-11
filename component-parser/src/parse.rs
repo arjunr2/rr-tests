@@ -3,6 +3,7 @@
 use anyhow::{Result, bail};
 use std::cell::RefCell;
 use std::rc::Rc;
+use wirm::Module;
 use wirm::wasmparser::{
     self, CanonicalOption, ComponentAlias, ComponentExport, ComponentExternalKind, ComponentImport,
     ComponentInstance, ComponentTypeRef, ExternalKind, Instance, Parser, Payload,
@@ -149,7 +150,7 @@ fn handle_payload<'a>(
             // Extract the module bytes from the range
             let module_bytes = &bytes[unchecked_range.start..unchecked_range.end];
             // Parse the module bytes into wirm Module IR
-            let parsed_module = wirm::Module::parse(module_bytes, false, false)
+            let parsed_module = Module::parse(module_bytes, false, false)
                 .map_err(|e| anyhow::anyhow!("Failed to parse module: {}", e))?;
             component.modules.push(ModuleNode::Defined {
                 module: parsed_module,
