@@ -147,10 +147,23 @@ pub struct LinkingMetadata<'a> {
     pub export_funcs: HashMap<ModuleInstanceID, Vec<ExportFuncMetadata>>,
 }
 
+#[derive(Debug, Serialize)]
+/// Information about canonical adapters (just Lower for now) for imports in the custom section
+struct ImportAdapterCrimpData {
+    /// The import index that this adapter is for
+    target: ModuleImportIndex,
+    /// The memory to use for adapter
+    memory: ModuleInstanceExport,
+    /// The realloc to use for adapter
+    realloc: ModuleInstanceExport,
+}
+
 #[derive(Debug, Serialize, Default)]
+/// The CRIMP replay custom section serializable data
 struct CrimpSectionData<'a> {
     checksum: Checksum,
     instantiate_order: InstantiateOrder,
+    import_adapters: Vec<ImportAdapterCrimpData>,
     exports: Vec<&'a ExportFuncMetadata>,
 }
 
@@ -179,6 +192,8 @@ impl<'a> LinkingMetadata<'a> {
         let imports = self.instantiations[&instance_id].imports.clone();
         let mut populated = vec![false; module.imports.len()];
         let mut counter = 0;
+        // For use in custom section encoding
+        let mut import_adapters = vec![];
         for (idx, import_kind) in imports {
             populated[*idx as usize] = true;
             match import_kind {
@@ -192,7 +207,7 @@ impl<'a> LinkingMetadata<'a> {
                     );
                     counter += 1;
                 }
-                ImportKind::TrueImport(_) => {
+                ImportKind::TrueImport(opts) => {
                     // Engine will stub with the replay result
                     // Just provide a nice readable name
                     module.imports.set_import_name(
@@ -201,6 +216,18 @@ impl<'a> LinkingMetadata<'a> {
                         WirmImportsID(*idx),
                     );
                     counter += 1;
+                    if let Some(opts) = opts {
+                        assert!(
+                            opts.post_return.is_none(),
+                            "Post return should never be present for module imports"
+                        );
+                        // When memory and realloc are always set together, if present
+                        import_adapters.push(ImportAdapterCrimpData {
+                            target: idx,
+                            memory: opts.memory.unwrap(),
+                            realloc: opts.realloc.unwrap(),
+                        });
+                    }
                 }
                 ImportKind::Rename { package, member } => {
                     module.imports.set_import_name(
@@ -223,6 +250,7 @@ impl<'a> LinkingMetadata<'a> {
         let data = CrimpSectionData {
             checksum: self.checksum,
             instantiate_order: self.instantiations[&instance_id].instantiate_order,
+            import_adapters,
             exports: self
                 .export_funcs
                 .get(&instance_id)
