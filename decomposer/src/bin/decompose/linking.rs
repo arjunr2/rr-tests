@@ -2,8 +2,8 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::ops::Deref;
 
-use component_parser::wirm::Module;
-use component_parser::wirm::ir::id::ImportsID as WirmImportsID;
+use decomposer::wirm::ir::id::ImportsID as WirmImportsID;
+use decomposer::wirm::Module;
 use serde::Serialize;
 
 /// Unified naming of instances from IDs
@@ -34,8 +34,8 @@ impl std::ops::Deref for ModuleImportIndex {
         &self.0
     }
 }
-impl From<component_parser::wirm::ir::id::ImportsID> for ModuleImportIndex {
-    fn from(id: component_parser::wirm::ir::id::ImportsID) -> Self {
+impl From<WirmImportsID> for ModuleImportIndex {
+    fn from(id: WirmImportsID) -> Self {
         Self(id.0)
     }
 }

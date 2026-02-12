@@ -1,8 +1,9 @@
 [workspace]
 members = [
     "crimp-tests",
+    "crimp-ffi",
     "snapshot",
-    "component-parser",
+    "decomposer",
 ]
 resolver = "3"
 

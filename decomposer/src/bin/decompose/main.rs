@@ -1,8 +1,8 @@
 //! CLI tool to decompose a WebAssembly Component into its constituent modules.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use component_parser::wasmparser::{
+use decomposer::wasmparser::{
     CanonicalOption, ComponentExternalKind, ExternalKind, InstantiationArgKind, Validator,
 };
 use env_logger;
@@ -14,15 +14,15 @@ use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use component_parser::Component;
-use component_parser::ir::{
+use decomposer::ir::{
     CoreInstanceNode, Resolve, ResolvedComponentFunc, ResolvedComponentInstance, ResolvedCoreFunc,
     ResolvedCoreInstance, ResolvedModule,
 };
-use component_parser::parse_component;
-use component_parser::wirm::Module;
-use component_parser::wirm::ir::module::module_exports::Export;
-use component_parser::wirm::ir::types::CustomSection;
+use decomposer::parse_component;
+use decomposer::wirm::ir::module::module_exports::Export;
+use decomposer::wirm::ir::types::CustomSection;
+use decomposer::wirm::Module;
+use decomposer::Component;
 
 mod linking;
 use linking::*;
