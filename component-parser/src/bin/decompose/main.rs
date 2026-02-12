@@ -582,7 +582,7 @@ impl<'a> ComponentDecomposed<'a> {
             .map(|instance_id| {
                 let (mut crimp_module, crimp_section) =
                     linking.serialize_crimp_section(*instance_id)?;
-                let _cid = crimp_module.custom_sections.add(CustomSection {
+                let _cid = crimp_module.add_custom_section(CustomSection {
                     name: "crimp-replay",
                     data: Cow::from(crimp_section),
                 });

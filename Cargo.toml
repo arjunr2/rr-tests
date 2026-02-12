@@ -16,13 +16,10 @@ prime_factorization = "1.0.5"
 env_logger = "0.11.8"
 anyhow = "1.0.100"
 log = "0.4.28"
-wasmtime = { path = "../wasmtime-rr-prototyping/crates/wasmtime" }
-wasmtime-wasi = { path = "../wasmtime-rr-prototyping/crates/wasi", features = ["default"] }
-#wasmtime = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["default"] }
-#wasmtime-wasi = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["default"] }
-#wasm-crimp = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["std"] }
-# For wirm/parsing
-wirm = { path = "../wirm" }
-#wirm = { git = "https://github.com/composablesys/wirm.git", branch = "feature/support-components" }
+wasmtime = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["default"] }
+wasmtime-wasi = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["default"] }
+wasm-crimp = { git = "https://github.com/bytecodealliance/wasmtime-rr-prototyping.git", branch = "crimp-dev", features = ["std"] }
+# For wirm/parsing (feature/support-components branch)
+wirm = { git = "https://github.com/composablesys/wirm.git", rev = "78aca16" }
 wasmprinter = "0.244.0"
 wat = "1.244.0"

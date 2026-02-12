@@ -2,3 +2,4 @@
 *.trace
 test-modules/components
 data
+*.cwasm
