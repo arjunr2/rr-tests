@@ -158,10 +158,11 @@ struct ImportAdapterCrimpData {
     realloc: Option<ModuleInstanceExport>,
 }
 
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize)]
 /// The CRIMP replay custom section serializable data
 struct CrimpSectionData<'a> {
     checksum: Checksum,
+    instance_id: ModuleInstanceID,
     instantiate_order: InstantiateOrder,
     import_adapters: Vec<ImportAdapterCrimpData>,
     exports: Vec<&'a ExportFuncMetadata>,
@@ -249,6 +250,7 @@ impl<'a> LinkingMetadata<'a> {
         let empty = vec![];
         let data = CrimpSectionData {
             checksum: self.checksum,
+            instance_id,
             instantiate_order: self.instantiations[&instance_id].instantiate_order,
             import_adapters,
             exports: self
