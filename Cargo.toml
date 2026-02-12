@@ -2,7 +2,6 @@
 members = [
     "crimp-tests",
     "snapshot",
-    "wasi-modules",
     "component-parser",
 ]
 resolver = "3"

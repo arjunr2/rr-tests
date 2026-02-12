@@ -3,11 +3,13 @@ name = "wasi-modules"
 edition = "2024"
 
 [[bin]]
-name = "wasi-compressor"
+name = "compressor"
 path = "compressor.rs"
 
 [dependencies]
 anyhow = "1.0.98"
-clap = { workspace = true, features = ["derive"] }
+clap = { version = "4.5.40", features = ["derive"] }
 walkdir = "2.5.0"
 zstd = "0.13.3"
+
+[workspace]
