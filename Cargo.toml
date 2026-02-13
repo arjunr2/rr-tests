@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "crimp-tests",
-    "crimp-ffi",
+    "crimp-glue/tracereader",
     "snapshot",
     "decomposer",
 ]

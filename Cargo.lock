@@ -496,7 +496,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "crimp-ffi"
+name = "crimp-glue-tracereader"
 version = "0.0.1"
 dependencies = [
  "anyhow",
