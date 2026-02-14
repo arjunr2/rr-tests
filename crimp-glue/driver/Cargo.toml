@@ -1,0 +1,18 @@
+[package]
+name = "crimp-glue-driver"
+edition = "2024"
+version.workspace = true
+authors.workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+wasm-crimp.workspace = true
+anyhow.workspace = true
+env_logger.workspace = true
+clap.workspace = true
+log.workspace = true
+
+[features]
+multi-component = []
